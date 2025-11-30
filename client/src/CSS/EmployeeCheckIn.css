@@ -1,0 +1,100 @@
+/* EmployeeCheckIn.css */
+
+.container {
+  max-width: 420px;
+  min-height: 100vh;
+  margin: 0 auto;
+  text-align: center;
+  font-family: "Sarabun", "TH-Sarabun", sans-serif;
+  padding: 20px ;
+  background-color: #FF6539;
+  border-radius: 30px;
+}
+
+.profile-img {
+  border-radius: 50%;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 8px;
+}
+
+.button-block {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.checkout-button {
+  margin-bottom: 16px;
+  background: #52c41a;
+  border-color: #52c41a;
+  height: 50px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.card-checkout {
+  margin-bottom: 16px;
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+
+.card-checkout-text {
+  color: #52c41a;
+}
+
+#qr-reader {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+/* Modals */
+.modal-center {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.modal-success-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.modal-title-success {
+  color: #52c41a;
+  margin-bottom: 16px;
+}
+
+.modal-title-error {
+  color: #ff4d4f;
+  margin-bottom: 16px;
+}
+
+.modal-pre {
+  white-space: pre-wrap;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: "Sarabun", "TH-Sarabun", sans-serif;
+  color: #666;
+}
+
+/* Early/Late Modals */
+.modal-image {
+  width: 80%;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.modal-text {
+  font-size: 16px;
+  margin-top: 12px;
+  text-align: left;
+}
+
+/* Close button */
+.close-button {
+  height: 58px;
+  border-radius: 8px;
+  background: #333333;
+  color: #fff;
+  font-weight: 700;
+}

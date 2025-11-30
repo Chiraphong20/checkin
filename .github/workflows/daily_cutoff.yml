@@ -1,0 +1,30 @@
+name: Daily Absent Cutoff
+
+on:
+  schedule:
+    # ตั้งเวลาทำงาน (UTC Time)
+    # ประเทศไทยคือ UTC+7 ดังนั้น 17:00 น. ไทย คือ 10:00 UTC
+    # รูปแบบ Cron: นาที ชั่วโมง วัน เดือน วันในสัปดาห์
+    - cron: '0 10 * * *' 
+  workflow_dispatch: # เพื่อให้กดรันเล่นได้ด้วย
+
+jobs:
+  cutoff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install firebase-admin dayjs
+
+      - name: Run Cutoff Script
+        env:
+          # เราจะเอา JSON Key ไปใส่ใน GitHub Secrets ชื่อ FIREBASE_SERVICE_ACCOUNT
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/auto-cutoff.js

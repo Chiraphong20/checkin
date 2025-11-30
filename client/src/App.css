@@ -1,0 +1,72 @@
+/* ไฟล์: client/src/App.css */
+
+.app-layout {
+  min-height: 100vh;
+}
+
+.sider-logo {
+  height: 32px;
+  margin: 16px;
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 32px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+}
+
+.app-header {
+  padding: 0 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.header-title {
+  margin: 16px 0;
+}
+
+.app-content {
+  margin: 24px 16px;
+  padding: 0px;
+  background: #f5f5f5;
+  min-height: auto; 
+}
+
+.data-card {
+  margin-top: 24px;
+}
+
+.filter-space {
+  margin-bottom: 16px;
+}
+
+/* Custom styles for Dashboard */
+.ant-menu-item-selected {
+  background-color: #ff6b35 !important;
+  color: white !important;
+}
+
+.ant-menu-item-selected .anticon {
+  color: white !important;
+}
+
+.ant-table-thead > tr > th {
+  background: #e6f7ff !important;
+  font-weight: 600 !important;
+}
+
+.dashboard-table .ant-table-thead > tr > th {
+  background: #e6f7ff !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid #bae7ff !important;
+}
+
+.ant-card {
+  border-radius: 12px;
+}
+
+/* Branch filter tabs hover effect */
+.branch-tab:hover {
+  background-color: #f0f0f0;
+}
