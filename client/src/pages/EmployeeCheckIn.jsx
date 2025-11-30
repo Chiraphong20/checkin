@@ -15,7 +15,7 @@ import dayjs from "dayjs";
 import "dayjs/locale/th"; 
 import { initLiff, getProfile, getLineUserId } from "../liff/liff-checkin";
 import { Html5Qrcode } from "html5-qrcode";
-import "../css/EmployeeCheckIn.css"; 
+//import "../css/EmployeeCheckIn.css"; 
 
 dayjs.locale('th');
 
