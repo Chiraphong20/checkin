@@ -321,6 +321,9 @@ const Dashboard = () => {
       });
   }, [mergedCheckins, branchEmployeeIds, selectedBranch, selectedRange, employees]);
 
+ // ---------------------------------------------------------
+  // 🔹 แก้ไข: เรียงลำดับข้อมูลวันนี้ (ล่าสุดขึ้นบน)
+  // ---------------------------------------------------------
   const todayData = useMemo(() => {
     if (selectedRange !== "today") return [];
 
@@ -336,12 +339,32 @@ const Dashboard = () => {
         const existingTime = existing.checkinTime || "00:00";
         const newTime = item.checkinTime || "00:00";
 
+        // เก็บข้อมูลล่าสุดไว้เสมอ
         if (newTime >= existingTime) map.set(key, item);
         if (existing.__isLeave && !item.__isLeave) map.set(key, item);
       }
     });
 
-    return Array.from(map.values());
+    // ✅ เพิ่ม Logic Sort ตรงนี้:
+    return Array.from(map.values()).sort((a, b) => {
+       const timeA = a.checkinTime === "-" ? "" : a.checkinTime;
+       const timeB = b.checkinTime === "-" ? "" : b.checkinTime;
+
+       // 1. ถ้ามีเวลาทั้งคู่ ให้เรียงจาก มาก -> น้อย (ล่าสุดอยู่บน)
+       if (timeA && timeB) {
+          return timeB.localeCompare(timeA);
+       }
+
+       // 2. ถ้า A มีเวลา แต่ B ไม่มี -> A ขึ้นก่อน
+       if (timeA && !timeB) return -1;
+
+       // 3. ถ้า B มีเวลา แต่ A ไม่มี -> B ขึ้นก่อน
+       if (!timeA && timeB) return 1;
+
+       // 4. ถ้าไม่มีเวลาทั้งคู่ (เช่น ยังไม่เช็คอิน) ให้เรียงตามชื่อ
+       return a.name.localeCompare(b.name);
+    });
+
   }, [processedCheckins, selectedRange]);
 
 const groupedRangeData = useMemo(() => {
