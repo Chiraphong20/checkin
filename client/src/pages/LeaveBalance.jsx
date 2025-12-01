@@ -6,7 +6,7 @@ import { db } from "../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore"; 
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween"; 
-import isSameOrBefore from "dayjs/plugin/isSameOrBefore"; // ✅ เพิ่ม plugin นี้เพื่อวนลูปวัน
+import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import "dayjs/locale/th";
 
 dayjs.locale('th');
@@ -16,7 +16,7 @@ dayjs.extend(isSameOrBefore);
 const { Title, Text } = Typography;
 
 const departments = [
-  { code: "01", name: "ผู้บริหาร / กรรมการ" },
+  { code: "01", name: "ผู้บริหาร" },
   { code: "02", name: "Office" },
   { code: "03", name: "พนักงานขาย" },
   { code: "04", name: "พนักงานขนส่ง" },
@@ -26,13 +26,14 @@ export default function LeaveBalance() {
   const [loading, setLoading] = useState(true);
   const [employee, setEmployee] = useState(null);
   const [leaveData, setLeaveData] = useState({
-    monthlyLeave: 0,
-    annualLeave: 0,
-    usedLeave: 0,
-    usedYearLeave: 0,
-    monthlyLeaveQuota: 5,
+    monthlyQuota: 0,      // โควต้าเดือนนี้
+    accumulatedQuota: 0,  // โควต้าสะสม (เฉพาะ Sales/Transport)
+    remainingQuota: 0,    // คงเหลือสุทธิ
+    annualLeaveTotal: 0,  // สิทธิ์พักร้อนทั้งปี
+    annualLeaveUsed: 0,   // พักร้อนที่ใช้ไป
+    usedLeaveMonth: 0,    // ใช้ไปเดือนนี้ (วันหยุดทั่วไป)
     yearsOfService: 0,
-    isPrivileged: false
+    isPrivileged: false   // เป็น Office/Admin ไหม
   });
   const [historyList, setHistoryList] = useState([]); 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,154 +42,178 @@ export default function LeaveBalance() {
     const initLiff = async () => {
       try {
         await liff.init({ liffId: "2008408737-4x2nLQp8" });
-
-        if (!liff.isLoggedIn()) {
-          liff.login();
-          return;
-        }
-
+        if (!liff.isLoggedIn()) { liff.login(); return; }
         const profile = await liff.getProfile();
-        const lineUserId = profile.userId;
-
+        
         // 1. ดึงข้อมูลพนักงาน
-        const q = query(collection(db, "employees"), where("lineUserId", "==", lineUserId));
+        const q = query(collection(db, "employees"), where("lineUserId", "==", profile.userId));
         const querySnapshot = await getDocs(q);
-
         if (querySnapshot.empty) {
           message.warning("ไม่พบข้อมูลพนักงาน");
           setLoading(false);
           return;
         }
-
         const empDoc = querySnapshot.docs[0];
         const empData = { employeeId: empDoc.id, ...empDoc.data() };
-        empData.pictureUrl = profile.pictureUrl || empData.profileImage; 
+        empData.pictureUrl = profile.pictureUrl || empData.profileImage;
         setEmployee(empData);
 
-        // 2. ดึงข้อมูล Check-in
-        const checkInQuery = query(
-          collection(db, "employee_checkin"),
-          where("employeeId", "==", empData.employeeId)
-        );
-        const checkInSnap = await getDocs(checkInQuery);
-        const checkIns = checkInSnap.docs.map((doc) => doc.data());
+        // 2. ดึงข้อมูลวันหยุดนักขัตฤกษ์
+        const holidaysSnap = await getDocs(collection(db, "public_holidays"));
+        const publicHolidays = holidaysSnap.docs.map(d => d.data().date);
 
-        // 3. ดึงข้อมูล Leave
-        const leaveQuery = query(
-          collection(db, "employee_leave"),
-          where("employeeId", "==", empData.employeeId)
-        );
-        const leaveSnap = await getDocs(leaveQuery);
-        const leaves = leaveSnap.docs.map((doc) => doc.data());
-
-        // --- เริ่มการประมวลผล ---
+        // 3. ดึงประวัติการลา/ขาด ทั้งหมดในปีนี้
         const currentYear = dayjs().format("YYYY");
-        const currentMonth = dayjs().format("YYYY-MM");
         
-        let mergedHistory = [];
+        // ดึง Checkin (ขาด/สายมาก)
+        const checkInQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", empData.employeeId));
+        const checkIns = (await getDocs(checkInQuery)).docs.map(d => d.data());
 
-        // A. แปลงข้อมูล Check-in (ขาด/สายมาก)
+        // ดึง Leave (ใบลา)
+        const leaveQuery = query(collection(db, "employee_leave"), where("employeeId", "==", empData.employeeId));
+        const leaves = (await getDocs(leaveQuery)).docs.map(d => d.data());
+
+        // --- ประมวลผลประวัติการลาทั้งหมด ---
+        let allRecords = [];
+
+        // A. จาก Checkin
         checkIns.forEach(item => {
-            const isAbnormal = item.status && (
-                item.status.includes("หยุด") || 
-                item.status.includes("ขาดงาน") || 
-                item.status.includes("สายมาก") ||
-                item.status.includes("พักร้อน") ||
-                item.status.includes("ลา")
+            const isOff = item.status && (
+                item.status.includes("หยุด") || item.status.includes("ขาด") || 
+                item.status.includes("สายมาก") || item.status.includes("ลา")
             );
-
-            if (isAbnormal) {
-                mergedHistory.push({
-                    date: item.date,
-                    status: item.status,
-                    type: "checkin", 
-                    details: item.checkinTime !== "-" ? `เวลา: ${item.checkinTime}` : "ไม่ได้ลงเวลา"
-                });
+            if (isOff && item.date.startsWith(currentYear)) {
+                allRecords.push({ date: item.date, type: "checkin", status: item.status });
             }
         });
 
-        // B. แปลงข้อมูล Leave (ใบลาจาก Admin)
-        leaves.forEach(leave => {
-            // 🔥 แก้ไขจุดสำคัญ: รองรับทั้ง 'date' (Admin ลง) และ 'start/end' (ระบบเดิม)
-            const startDateStr = leave.start || leave.date;
-            // ถ้าไม่มี end ให้ถือว่าเป็นวันเดียวกับ start
-            const endDateStr = leave.end || leave.date || startDateStr; 
-
-            if (!startDateStr) return; // ข้ามถ้าไม่มีวันที่
-
-            let curr = dayjs(startDateStr);
-            const end = dayjs(endDateStr);
-
-            // วนลูปเผื่อกรณีลาต่อเนื่องหลายวัน
-            while (curr.isSameOrBefore(end, 'day')) {
-                const dateStr = curr.format("YYYY-MM-DD");
-                
-                // เช็คว่าวันนั้นซ้ำกับ Check-in หรือไม่
-                const exists = mergedHistory.find(h => h.date === dateStr);
-                
-                if (!exists) {
-                    // กำหนดชื่อสถานะให้สวยงาม
-                    let displayStatus = leave.type || "ลาหยุด";
-                    if (leave.status === "Approved") displayStatus += " (อนุมัติ)";
-                    else if (leave.status === "Pending") displayStatus += " (รออนุมัติ)";
-                    
-                    mergedHistory.push({
-                        date: dateStr,
-                        status: displayStatus,
-                        type: "leave",
-                        details: leave.reason || "บันทึกโดย Admin"
-                    });
+        // B. จาก Leave (แตกช่วงวัน)
+        leaves.forEach(l => {
+            const start = dayjs(l.start || l.date);
+            const end = dayjs(l.end || l.date);
+            let curr = start;
+            while(curr.isSameOrBefore(end, 'day')) {
+                const dStr = curr.format("YYYY-MM-DD");
+                if (dStr.startsWith(currentYear)) {
+                    // เช็คซ้ำ
+                    if (!allRecords.find(r => r.date === dStr)) {
+                        allRecords.push({ 
+                            date: dStr, 
+                            type: "leave", 
+                            status: l.type, // พักร้อน / ลากิจ / ลาป่วย
+                            reason: l.reason 
+                        });
+                    }
                 }
                 curr = curr.add(1, 'day');
             }
         });
 
-        // เรียงลำดับวันที่ (ใหม่ -> เก่า)
-        mergedHistory.sort((a, b) => b.date.localeCompare(a.date));
+        // --- เริ่มคำนวณโควต้า ---
+        const isOffice = ["01", "02"].includes(empData.department);
+        const startWork = empData.startDate ? dayjs(empData.startDate) : dayjs();
+        const yearsOfService = dayjs().diff(startWork, 'year', true);
+        const currentMonthStr = dayjs().format("YYYY-MM");
 
-        // C. คำนวณยอด
-        const currentMonthList = mergedHistory.filter(h => h.date.startsWith(currentMonth));
-        const currentYearList = mergedHistory.filter(h => h.date.startsWith(currentYear));
+        // 1. คำนวณพักร้อน (Annual Leave)
+        let annualTotal = 0;
+        let annualUsed = 0;
 
-        const usedLeave = currentMonthList.length;
-        const usedYearLeave = currentYearList.length;
-        
-        const monthlyLeaveQuota = 5;
-        const monthlyLeave = Math.max(0, monthlyLeaveQuota - usedLeave);
-        
-        // คำนวณวันพักร้อน (Logic เดิม)
-        let baseAnnual = 0;
-        let yearsOfService = 0;
-        let isPrivileged = ["01", "02"].includes(empData.department);
-
-        if (empData.startDate) {
-            yearsOfService = dayjs().diff(dayjs(empData.startDate), 'year', true);
+        if (yearsOfService >= 1) {
+            annualTotal = isOffice ? 6 : 11;
         }
-        
-        if (isPrivileged || yearsOfService >= 1) {
-            baseAnnual = empData.department === "01" ? 15 : 11;
+
+        // นับยอดพักร้อนที่ใช้ไป
+        annualUsed = allRecords.filter(r => r.status && r.status.includes("พักร้อน")).length;
+
+        // 2. คำนวณวันหยุดรายเดือน (Monthly Leave)
+        let monthlyQuota = 0;
+        let accumulatedQuota = 0; // วันหยุดสะสม (เฉพาะ Sales/Transport)
+        let usedMonth = 0;
+
+        // ฟังก์ชันนับเสาร์อาทิตย์ในเดือน
+        const countWeekends = (month) => {
+            let count = 0;
+            const daysInMonth = month.daysInMonth();
+            for(let i=1; i<=daysInMonth; i++) {
+                const d = month.date(i);
+                const dayOfWeek = d.day(); // 0=Sun, 6=Sat
+                if (dayOfWeek === 0 || dayOfWeek === 6) count++;
+            }
+            return count;
+        };
+
+        if (isOffice) {
+            // === Office / Admin ===
+            // โควต้า = จำนวนเสาร์อาทิตย์ในเดือนนี้
+            monthlyQuota = countWeekends(dayjs());
+            
+            // การนับวันหยุดที่ใช้ (ไม่นับวันนักขัตฤกษ์)
+            usedMonth = allRecords.filter(r => {
+                const isThisMonth = r.date.startsWith(currentMonthStr);
+                const isHoliday = publicHolidays.includes(r.date);
+                const isVacation = r.status.includes("พักร้อน");
+                // นับเฉพาะเดือนนี้ + ไม่ใช่นักขัตฤกษ์ + ไม่ใช่พักร้อน
+                return isThisMonth && !isHoliday && !isVacation;
+            }).length;
+
+        } else {
+            // === Sales / Transport ===
+            // วนลูปตั้งแต่มกราคม ถึง เดือนปัจจุบัน เพื่อคำนวณสะสม
+            const now = dayjs();
+            let tempQuota = 0;
+
+            for (let m = 0; m <= now.month(); m++) {
+                const loopMonth = dayjs().month(m);
+                const monthStr = loopMonth.format("YYYY-MM");
+                
+                // กำหนดโควต้า
+                let q = (m === 1) ? 4 : 5; // ก.พ. (index 1) ได้ 4 วัน, อื่นๆ 5 วัน
+                
+                // หาจำนวนวันที่ใช้ในเดือนนั้น (ไม่รวมพักร้อน)
+                const usedInLoop = allRecords.filter(r => 
+                    r.date.startsWith(monthStr) && !r.status.includes("พักร้อน")
+                ).length;
+
+                if (m === now.month()) {
+                    // เดือนปัจจุบัน
+                    accumulatedQuota = tempQuota; // ยอดสะสมยกมา
+                    monthlyQuota = q;             // ยอดใหม่เดือนนี้
+                    usedMonth = usedInLoop;       // ใช้ไปเดือนนี้
+                } else {
+                    // เดือนที่ผ่านมา -> คำนวณสะสม
+                    const remain = Math.max(0, q - usedInLoop);
+                    tempQuota += remain;
+                }
+            }
         }
+
+        const remainingQuota = (monthlyQuota + accumulatedQuota) - usedMonth;
+
+        // Prepare History List for Modal
+        const history = allRecords
+            .filter(r => r.date.startsWith(currentMonthStr))
+            .sort((a,b) => b.date.localeCompare(a.date));
 
         setLeaveData({
-          monthlyLeave,
-          annualLeave: baseAnnual + monthlyLeave,
-          usedLeave,
-          usedYearLeave,
-          monthlyLeaveQuota,
-          yearsOfService: Math.floor(yearsOfService),
-          isPrivileged
+            monthlyQuota,
+            accumulatedQuota,
+            remainingQuota,
+            annualLeaveTotal: annualTotal,
+            annualLeaveUsed: annualUsed,
+            usedLeaveMonth: usedMonth,
+            yearsOfService: Math.floor(yearsOfService),
+            isPrivileged: isOffice
         });
-
-        setHistoryList(currentMonthList); 
+        
+        setHistoryList(history);
         setLoading(false);
 
       } catch (err) {
         console.error(err);
-        message.error("โหลดข้อมูลล้มเหลว");
         setLoading(false);
       }
     };
-
     initLiff();
   }, []);
 
@@ -196,17 +221,10 @@ export default function LeaveBalance() {
   if (!employee) return null;
 
   const departmentName = departments.find((d) => d.code === employee.department)?.name || "-";
-  const monthlyPercent = (leaveData.usedLeave / leaveData.monthlyLeaveQuota) * 100;
-
-  const getStatusColor = (status) => {
-      const s = status || "";
-      if (s.includes("ป่วย")) return "blue";
-      if (s.includes("พักร้อน")) return "cyan";
-      if (s.includes("กิจ")) return "green";
-      if (s.includes("ขาด") || s.includes("สายมาก")) return "red";
-      if (s.includes("รออนุมัติ")) return "orange";
-      return "gold";
-  };
+  
+  // Percent Calculation
+  const totalAvailable = leaveData.monthlyQuota + leaveData.accumulatedQuota;
+  const percent = totalAvailable > 0 ? (leaveData.usedLeaveMonth / totalAvailable) * 100 : 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f7fa", paddingBottom: 40, fontFamily: "'Sarabun', sans-serif" }}>
@@ -217,83 +235,93 @@ export default function LeaveBalance() {
             <div>
                 <Title level={4} style={{ color: "white", margin: 0 }}>{employee.name}</Title>
                 <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 14 }}>{departmentName}</Text>
-                <div style={{ marginTop: 4 }}><Tag color="gold" style={{ borderRadius: 10, border: 'none', color: '#874d00' }}>รหัส: {employee.employeeId}</Tag></div>
+                <div style={{ marginTop: 4 }}><Tag color="gold" style={{ borderRadius: 10, border: 'none', color: '#874d00' }}>อายุงาน: {leaveData.yearsOfService} ปี</Tag></div>
             </div>
         </Flex>
       </div>
 
       <div style={{ padding: "0 20px", marginTop: -35 }}>
         
-        {/* Card: เดือนนี้ */}
+        {/* Card 1: วันหยุดเดือนนี้ */}
         <Card bordered={false} style={{ borderRadius: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.05)", marginBottom: 20 }}>
             <Flex justify="space-between" align="center" style={{ marginBottom: 15 }}>
-                <Title level={5} style={{ margin: 0, color: '#333' }}><CalendarOutlined style={{ color: '#FF6539', marginRight: 8 }} />เดือน {dayjs().format("MMMM")}</Title>
-                <Tag color={leaveData.monthlyLeave > 0 ? "success" : "error"}>เหลือ {leaveData.monthlyLeave} วัน</Tag>
+                <Title level={5} style={{ margin: 0, color: '#333' }}>
+                    <CalendarOutlined style={{ color: '#FF6539', marginRight: 8 }} />
+                    วันหยุดเดือนนี้ ({dayjs().format("MMMM")})
+                </Title>
+                <Tag color={leaveData.remainingQuota >= 0 ? "success" : "error"}>
+                    เหลือ {leaveData.remainingQuota} วัน
+                </Tag>
             </Flex>
+            
             <Flex align="center" justify="space-between" gap="large">
                 <div style={{ flex: 1 }}>
-                     <Statistic title="โควต้า" value={leaveData.monthlyLeaveQuota} suffix="วัน" valueStyle={{ fontSize: 20 }} />
+                     <Statistic title={leaveData.isPrivileged ? "โควต้า (เสาร์-อาทิตย์)" : "โควต้าเดือนนี้"} value={leaveData.monthlyQuota} suffix="วัน" valueStyle={{ fontSize: 18 }} />
+                     
+                     {!leaveData.isPrivileged && (
+                        <div style={{ marginTop: 5 }}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>+ สะสมยกมา: {leaveData.accumulatedQuota} วัน</Text>
+                        </div>
+                     )}
+                     
                      <div style={{ height: 8 }} />
-                     <Statistic title="ใช้ไปแล้ว" value={leaveData.usedLeave} suffix="วัน" valueStyle={{ color: '#faad14', fontSize: 20 }} />
+                     <Statistic title="ใช้ไปแล้ว" value={leaveData.usedLeaveMonth} suffix="วัน" valueStyle={{ color: '#faad14', fontSize: 20 }} />
                 </div>
+                
                 <div style={{ textAlign: 'center' }}>
-                    <Progress type="circle" percent={monthlyPercent} width={90} strokeColor={leaveData.monthlyLeave > 0 ? "#52c41a" : "#ff4d4f"} format={(p) => <div style={{ fontSize: 12, color: '#666' }}>ใช้ไป<br/><span style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>{leaveData.usedLeave}</span></div>} />
+                    <Progress type="circle" percent={percent} width={90} strokeColor={leaveData.remainingQuota >= 0 ? "#52c41a" : "#ff4d4f"} format={() => <div style={{ fontSize: 12, color: '#666' }}>ใช้ไป<br/><span style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>{leaveData.usedLeaveMonth}</span></div>} />
                 </div>
             </Flex>
+            
             <Divider style={{ margin: '15px 0' }} />
-            <Button type="dashed" block onClick={() => setIsModalOpen(true)} icon={<FileTextOutlined />}>ดูรายละเอียดวันลา</Button>
+            <Button type="dashed" block onClick={() => setIsModalOpen(true)} icon={<FileTextOutlined />}>ดูประวัติการหยุด</Button>
         </Card>
 
-        {/* Card: สะสมรายปี */}
-        <Card bordered={false} style={{ borderRadius: 16, marginBottom: 20, background: "linear-gradient(to right, #ffffff, #f0f5ff)" }}>
+        {/* Card 2: วันพักร้อน (Annual Leave) */}
+        <Card bordered={false} style={{ borderRadius: 16, marginBottom: 20, background: "linear-gradient(to right, #e6f7ff, #ffffff)" }}>
              <Flex justify="space-between" align="center">
                 <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>วันพักร้อนสะสม</Text>
-                    <Title level={3} style={{ margin: "5px 0", color: "#1890ff" }}>{leaveData.annualLeave} <span style={{ fontSize: 16, fontWeight: 400, color: '#999' }}>วัน</span></Title>
-                    <Text type="secondary" style={{ fontSize: 10 }}>*ตามเงื่อนไขบริษัท</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>สิทธิ์พักร้อนสะสม (ปีนี้)</Text>
+                    <Title level={3} style={{ margin: "5px 0", color: "#1890ff" }}>
+                        {Math.max(0, leaveData.annualLeaveTotal - leaveData.annualLeaveUsed)} 
+                        <span style={{ fontSize: 16, fontWeight: 400, color: '#999' }}> / {leaveData.annualLeaveTotal} วัน</span>
+                    </Title>
+                    {leaveData.yearsOfService < 1 && (
+                        <Text type="danger" style={{ fontSize: 10 }}>*ยังไม่ครบ 1 ปี ยังไม่มีสิทธิ์</Text>
+                    )}
                 </div>
-                <Statistic title="ใช้ไปในปีนี้" value={leaveData.usedYearLeave} suffix="วัน" valueStyle={{ color: '#1890ff', fontSize: 20 }} />
+                <div style={{ textAlign: 'right' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>ใช้ไป</Text>
+                    <div style={{ fontSize: 20, color: '#1890ff', fontWeight: 'bold' }}>{leaveData.annualLeaveUsed}</div>
+                </div>
              </Flex>
         </Card>
 
         <Button block size="large" type="primary" style={{ height: 50, borderRadius: 12, background: "#333" }} onClick={() => liff.closeWindow()}>ปิดหน้าต่าง</Button>
       </div>
 
-      {/* Modal Details */}
+      {/* Modal History */}
       <Modal
-        title={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><CalendarOutlined style={{ color: '#FF6539' }} /><span>ประวัติการลา (เดือนนี้)</span></div>}
+        title="ประวัติวันหยุด (เดือนนี้)"
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
-        footer={[<Button key="close" type="primary" onClick={() => setIsModalOpen(false)} style={{ background: '#333' }}>ปิด</Button>]}
+        footer={null}
         centered
-        width={350}
         bodyStyle={{ maxHeight: '60vh', overflowY: 'auto' }}
       >
-        {historyList.length > 0 ? (
-          <List
+        <List
             itemLayout="horizontal"
             dataSource={historyList}
             renderItem={(item) => (
               <List.Item>
                 <List.Item.Meta
-                  avatar={<Avatar style={{ backgroundColor: item.type === 'checkin' ? '#fff1f0' : '#e6f7ff', color: item.type === 'checkin' ? '#f5222d' : '#1890ff' }} icon={item.type === 'checkin' ? <ClockCircleOutlined /> : <FileTextOutlined />} />}
+                  avatar={<Avatar style={{ backgroundColor: '#fde3cf', color: '#f56a00' }} icon={<ClockCircleOutlined />} />}
                   title={dayjs(item.date).format("DD MMMM YYYY")}
-                  description={
-                      <div style={{ marginTop: 4 }}>
-                          <Tag color={getStatusColor(item.status)}>{item.status}</Tag>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{item.details}</Text>
-                      </div>
-                  }
+                  description={<Tag color="blue">{item.status}</Tag>}
                 />
               </List.Item>
             )}
-          />
-        ) : (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#999" }}>
-            <CalendarOutlined style={{ fontSize: 40, marginBottom: 10, color: "#d9d9d9" }} />
-            <p>ยังไม่มีประวัติการลาในเดือนนี้</p>
-          </div>
-        )}
+        />
       </Modal>
     </div>
   );
