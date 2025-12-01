@@ -9,12 +9,14 @@ import isBetween from "dayjs/plugin/isBetween";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import "dayjs/locale/th";
 
+// ตั้งค่าภาษาและ Plugin ให้ dayjs
 dayjs.locale('th');
 dayjs.extend(isBetween);
 dayjs.extend(isSameOrBefore);
 
 const { Title, Text } = Typography;
 
+// แผนก
 const departments = [
   { code: "01", name: "ผู้บริหาร" },
   { code: "02", name: "Office" },
@@ -25,9 +27,11 @@ const departments = [
 export default function LeaveBalance() {
   const [loading, setLoading] = useState(true);
   const [employee, setEmployee] = useState(null);
+  
+  // State เก็บข้อมูลวันลาและโควต้า
   const [leaveData, setLeaveData] = useState({
     monthlyQuota: 0,      // โควต้าเดือนนี้
-    accumulatedQuota: 0,  // โควต้าสะสม (เฉพาะ Sales/Transport)
+    accumulatedQuota: 0,  // โควต้าสะสม (ตั้งเป็น 0 เพื่อแก้ปัญหายอดพุ่ง)
     remainingQuota: 0,    // คงเหลือสุทธิ
     annualLeaveTotal: 0,  // สิทธิ์พักร้อนทั้งปี
     annualLeaveUsed: 0,   // พักร้อนที่ใช้ไป
@@ -35,13 +39,14 @@ export default function LeaveBalance() {
     yearsOfService: 0,
     isPrivileged: false   // เป็น Office/Admin ไหม
   });
+  
   const [historyList, setHistoryList] = useState([]); 
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const initLiff = async () => {
       try {
-        await liff.init({ liffId: "2008408737-4x2nLQp8" });
+        await liff.init({ liffId: "2008408737-4x2nLQp8" }); // ตรวจสอบ LIFF ID ให้ถูกต้อง
         if (!liff.isLoggedIn()) { liff.login(); return; }
         const profile = await liff.getProfile();
         
@@ -55,6 +60,7 @@ export default function LeaveBalance() {
         }
         const empDoc = querySnapshot.docs[0];
         const empData = { employeeId: empDoc.id, ...empDoc.data() };
+        // ใช้รูปจาก LINE ถ้าไม่มีให้ใช้จาก DB
         empData.pictureUrl = profile.pictureUrl || empData.profileImage;
         setEmployee(empData);
 
@@ -76,7 +82,7 @@ export default function LeaveBalance() {
         // --- ประมวลผลประวัติการลาทั้งหมด ---
         let allRecords = [];
 
-        // A. จาก Checkin
+        // A. จาก Checkin (หาเฉพาะวันที่ไม่ได้มาปกติ)
         checkIns.forEach(item => {
             const isOff = item.status && (
                 item.status.includes("หยุด") || item.status.includes("ขาด") || 
@@ -87,7 +93,7 @@ export default function LeaveBalance() {
             }
         });
 
-        // B. จาก Leave (แตกช่วงวัน)
+        // B. จาก Leave (แตกช่วงวันที่ลา เช่น ลา 3 วัน ก็แตกเป็น 3 record)
         leaves.forEach(l => {
             const start = dayjs(l.start || l.date);
             const end = dayjs(l.end || l.date);
@@ -95,7 +101,7 @@ export default function LeaveBalance() {
             while(curr.isSameOrBefore(end, 'day')) {
                 const dStr = curr.format("YYYY-MM-DD");
                 if (dStr.startsWith(currentYear)) {
-                    // เช็คซ้ำ
+                    // ป้องกันข้อมูลซ้ำ (เผื่อ checkin กับ leave ชนกัน)
                     if (!allRecords.find(r => r.date === dStr)) {
                         allRecords.push({ 
                             date: dStr, 
@@ -119,6 +125,7 @@ export default function LeaveBalance() {
         let annualTotal = 0;
         let annualUsed = 0;
 
+        // ทำงานครบ 1 ปี ถึงจะได้พักร้อน
         if (yearsOfService >= 1) {
             annualTotal = isOffice ? 6 : 11;
         }
@@ -128,7 +135,7 @@ export default function LeaveBalance() {
 
         // 2. คำนวณวันหยุดรายเดือน (Monthly Leave)
         let monthlyQuota = 0;
-        let accumulatedQuota = 0; // วันหยุดสะสม (เฉพาะ Sales/Transport)
+        let accumulatedQuota = 0; 
         let usedMonth = 0;
 
         // ฟังก์ชันนับเสาร์อาทิตย์ในเดือน
@@ -158,39 +165,27 @@ export default function LeaveBalance() {
             }).length;
 
         } else {
-            // === Sales / Transport ===
-            // วนลูปตั้งแต่มกราคม ถึง เดือนปัจจุบัน เพื่อคำนวณสะสม
-            const now = dayjs();
-            let tempQuota = 0;
+            // === Sales / Transport (แก้ไขใหม่) ===
+            // 🔥 เปลี่ยน Logic: คิดเฉพาะเดือนปัจจุบัน ไม่มีการสะสมจากเดือนก่อน
+            // เพื่อแก้ปัญหาที่ระบบคิดว่าเดือนก่อนๆ ไม่ได้หยุดเลยแล้วทบมาจนยอดเวอร์ (54 วัน)
+            
+            const currentMonthIndex = dayjs().month(); // 0 = ม.ค., 11 = ธ.ค.
+            
+            // กุมภาพันธ์ (index 1) ได้ 4 วัน, เดือนอื่นๆ ได้ 5 วัน
+            monthlyQuota = (currentMonthIndex === 1) ? 4 : 5; 
+            
+            // ตั้งค่าสะสมเป็น 0 
+            accumulatedQuota = 0;
 
-            for (let m = 0; m <= now.month(); m++) {
-                const loopMonth = dayjs().month(m);
-                const monthStr = loopMonth.format("YYYY-MM");
-                
-                // กำหนดโควต้า
-                let q = (m === 1) ? 4 : 5; // ก.พ. (index 1) ได้ 4 วัน, อื่นๆ 5 วัน
-                
-                // หาจำนวนวันที่ใช้ในเดือนนั้น (ไม่รวมพักร้อน)
-                const usedInLoop = allRecords.filter(r => 
-                    r.date.startsWith(monthStr) && !r.status.includes("พักร้อน")
-                ).length;
-
-                if (m === now.month()) {
-                    // เดือนปัจจุบัน
-                    accumulatedQuota = tempQuota; // ยอดสะสมยกมา
-                    monthlyQuota = q;             // ยอดใหม่เดือนนี้
-                    usedMonth = usedInLoop;       // ใช้ไปเดือนนี้
-                } else {
-                    // เดือนที่ผ่านมา -> คำนวณสะสม
-                    const remain = Math.max(0, q - usedInLoop);
-                    tempQuota += remain;
-                }
-            }
+            // นับวันที่ใช้ไปในเดือนนี้ (ไม่รวมพักร้อน)
+            usedMonth = allRecords.filter(r => 
+                r.date.startsWith(currentMonthStr) && !r.status.includes("พักร้อน")
+            ).length;
         }
 
         const remainingQuota = (monthlyQuota + accumulatedQuota) - usedMonth;
 
-        // Prepare History List for Modal
+        // เตรียมข้อมูลประวัติสำหรับ Modal (เฉพาะเดือนนี้)
         const history = allRecords
             .filter(r => r.date.startsWith(currentMonthStr))
             .sort((a,b) => b.date.localeCompare(a.date));
@@ -211,6 +206,7 @@ export default function LeaveBalance() {
 
       } catch (err) {
         console.error(err);
+        message.error("เกิดข้อผิดพลาดในการดึงข้อมูล");
         setLoading(false);
       }
     };
@@ -228,6 +224,7 @@ export default function LeaveBalance() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f7fa", paddingBottom: 40, fontFamily: "'Sarabun', sans-serif" }}>
+      
       {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #FF6539 0%, #ff8e6f 100%)", padding: "30px 20px 50px 20px", borderBottomLeftRadius: 30, borderBottomRightRadius: 30, color: "white", boxShadow: "0 4px 15px rgba(255, 101, 57, 0.3)" }}>
         <Flex align="center" gap="middle">
@@ -256,9 +253,15 @@ export default function LeaveBalance() {
             
             <Flex align="center" justify="space-between" gap="large">
                 <div style={{ flex: 1 }}>
-                     <Statistic title={leaveData.isPrivileged ? "โควต้า (เสาร์-อาทิตย์)" : "โควต้าเดือนนี้"} value={leaveData.monthlyQuota} suffix="วัน" valueStyle={{ fontSize: 18 }} />
+                     <Statistic 
+                        title={leaveData.isPrivileged ? "โควต้า (เสาร์-อาทิตย์)" : "โควต้าเดือนนี้"} 
+                        value={leaveData.monthlyQuota} 
+                        suffix="วัน" 
+                        valueStyle={{ fontSize: 18 }} 
+                     />
                      
-                     {!leaveData.isPrivileged && (
+                     {/* แสดงบรรทัดสะสมเฉพาะกรณีที่มียอดสะสมจริงๆ หรือไม่ใช่ Office (แต่ตอนนี้เราปิดสะสม sales/transport ไว้จะแสดงเป็น 0) */}
+                     {!leaveData.isPrivileged && leaveData.accumulatedQuota > 0 && (
                         <div style={{ marginTop: 5 }}>
                             <Text type="secondary" style={{ fontSize: 12 }}>+ สะสมยกมา: {leaveData.accumulatedQuota} วัน</Text>
                         </div>
