@@ -57,7 +57,7 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
     { key: "/dashboard", icon: <PieChartOutlined />, label: "ภาพรวมระบบ" },
     { key: "employees", icon: <UserOutlined />, label: "จัดการพนักงาน" },
     { key: "branches", icon: <ShopOutlined />, label: "จัดการสาขา" },
-    { key: "leave", icon: <CalendarOutlined />, label: "จัดการวันลา" },
+    { key: "leave", icon: <CalendarOutlined />, label: "ปฏิทินวันลา & วันหยุด" },
     { key: "reports", icon: <LineChartOutlined />, label: "สรุปผลรายงาน" },
     { key: "adcheckin", icon: <ScheduleOutlined />, label: "เช็คอินพนักงาน" },
 
