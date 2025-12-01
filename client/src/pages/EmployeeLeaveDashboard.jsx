@@ -319,7 +319,6 @@ export default function EmployeeLeaveCalendar() {
   return (
     <div style={{ padding: 20, background: "#fff", borderRadius: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20, alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>📅 ปฏิทินวันลา & วันหยุด</Title>
         <Space>
            <Button onClick={() => setIsHolidayManagerOpen(true)} icon={<UnorderedListOutlined />}>
               จัดการวันหยุด ({holidaysList.length})
