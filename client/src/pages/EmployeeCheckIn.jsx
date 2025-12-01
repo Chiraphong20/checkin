@@ -15,8 +15,8 @@ import dayjs from "dayjs";
 import "dayjs/locale/th"; 
 import { initLiff, getProfile, getLineUserId } from "../liff/liff-checkin";
 import { Html5Qrcode } from "html5-qrcode";
-//import "../css/EmployeeCheckIn.css"; 
 
+// ตั้งค่าภาษาไทยให้ dayjs
 dayjs.locale('th');
 
 const { Option } = Select;
@@ -41,7 +41,6 @@ export default function EmployeeCheckIn() {
   // Modals state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastCheckInMessage, setLastCheckInMessage] = useState("");
-  const [showEarlyModal, setShowEarlyModal] = useState(false); // ไม่ได้ใช้แต่คงไว้ตามเดิม
   const [showLateModal, setShowLateModal] = useState(false);
   const [showVeryLateModal, setShowVeryLateModal] = useState(false);
   const [showOutsideModal, setShowOutsideModal] = useState(false);
@@ -52,7 +51,7 @@ export default function EmployeeCheckIn() {
 
   const qrRef = useRef(null);
   const html5QrCodeRef = useRef(null);
-  const hasScannedRef = useRef(false);
+  const hasScannedRef = useRef(false); // ตัวแปรป้องกันการรันซ้ำ
   const [branchCoordsMap, setBranchCoordsMap] = useState({});
   const [settings, setSettings] = useState(null);
 
@@ -65,7 +64,7 @@ export default function EmployeeCheckIn() {
   const normalizeBranch = (s) => (s || "").toString().trim();
   const toRad = (deg) => (deg * Math.PI) / 180;
   
-  // คำนวณระยะห่างระหว่างจุด 2 จุด (หน่วยเมตร)
+  // คำนวณระยะห่าง (Haversine Formula)
   const haversineMeters = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3;
     const dLat = toRad(lat2 - lat1);
@@ -74,7 +73,7 @@ export default function EmployeeCheckIn() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // 🔥 แก้ไข 1: เพิ่ม Timeout เป็น 20000 (20 วินาที) เพื่อรอ GPS ได้นานขึ้น
+  // ขอพิกัด GPS
   const getCurrentPosition = () =>
     new Promise((resolve, reject) => {
       if (!navigator.geolocation) return reject(new Error("ไม่รองรับการระบุตำแหน่ง"));
@@ -84,7 +83,8 @@ export default function EmployeeCheckIn() {
         { 
             enableHighAccuracy: true, 
             timeout: 20000, 
-            maximumAge: 0 
+            // maximumAge: ยอมรับค่าเก่าที่แคชไว้ไม่เกิน 1 นาที (ช่วยลดการถาม Permission บ่อยๆ)
+            maximumAge: 60000 
         }
       );
     });
@@ -93,10 +93,12 @@ export default function EmployeeCheckIn() {
     if (!employeeId) return;
     const today = dayjs().format("YYYY-MM-DD");
 
+    // เช็คการลา
     const leaveQuery = query(collection(db, "employee_leave"), where("employeeId", "==", employeeId), where("date", "==", today));
     const leaveSnap = await getDocs(leaveQuery);
     const hasLeaveToday = !leaveSnap.empty;
 
+    // เช็คการลงเวลา
     const checkinQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", employeeId), where("date", "==", today));
     const checkinSnap = await getDocs(checkinQuery);
 
@@ -142,7 +144,7 @@ export default function EmployeeCheckIn() {
         setSettings({ radius: 100, startTimeMinutes: 480, checkoutTimeMinutes: 960 }); 
       }
       
-      await initLiff("2008408737-4x2nLQp8"); // <-- ตรวจสอบ LIFF ID ของคุณว่าถูกต้อง
+      await initLiff("2008408737-4x2nLQp8"); // ใส่ LIFF ID
       const profile = await getProfile();
       const userId = getLineUserId();
       if (!profile || !userId) {
@@ -188,7 +190,12 @@ export default function EmployeeCheckIn() {
     };
 
     startLiff();
-    return () => stopScanner();
+    // เมื่อ Component ถูกทำลาย ให้หยุดสแกนเสมอ
+    return () => {
+        if(html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+            html5QrCodeRef.current.stop().catch(err => console.error(err));
+        }
+    };
   }, []);
 
   // 2. Update Timer
@@ -211,20 +218,25 @@ export default function EmployeeCheckIn() {
     return () => clearInterval(dataInterval);
   }, [selectedEmployee, firstTime, settings]); 
 
-  // 🔥 แก้ไข 2: Logic การสแกนและคำนวณระยะทางแบบยืดหยุ่น (Accuracy Aware)
+
+  // ฟังก์ชันเริ่มสแกน
   const startQRScan = async () => {
     if (!qrRef.current || !selectedEmployee || scanning || !settings || !html5QrCodeRef.current) return;
     
     setScanning(true);
-    hasScannedRef.current = false;
+    hasScannedRef.current = false; // รีเซ็ตสถานะการสแกน
 
     try {
       await html5QrCodeRef.current.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 250 },
         async (decodedText) => {
+          // --- ป้องกัน Race Condition (สแกนซ้ำ) ---
           if (hasScannedRef.current) return;
           hasScannedRef.current = true;
+          
+          // 🔥 สั่งหยุดกล้องทันทีที่อ่านเจอ!
+          await stopScanner(); 
 
           let branchName = "";
           try {
@@ -232,30 +244,26 @@ export default function EmployeeCheckIn() {
             branchName = decodeURIComponent(url.searchParams.get("branch") || "").trim();
             if (!branchName) throw new Error("No branch");
           } catch (err) {
-            await stopScanner();
             message.error("QR Code ไม่ถูกต้อง");
+            setScanning(false); // ถ้าผิดพลาด ให้สถานะกลับมาพร้อมสแกนใหม่ (ถ้าต้องการ)
             return;
           }
 
           let outsideArea = false;
-          let debugMessage = ""; // ตัวแปรเก็บข้อความ Debug
+          let debugMessage = "";
 
           try {
             const pos = await getCurrentPosition();
-            // ดึงค่า accuracy (ความคลาดเคลื่อน) มาด้วย
             const { latitude, longitude, accuracy } = pos.coords; 
             const coords = branchCoordsMap[normalizeBranch(branchName)];
             
             if (coords) {
               const dist = haversineMeters(latitude, longitude, coords.lat, coords.lng);
-              
-              // 🔥 สูตร: ระยะทางจริง - ความคลาดเคลื่อน (ถ้าผลลัพธ์ติดลบ ให้เป็น 0)
-              // เพื่อให้โอกาสคนที่ GPS เหวี่ยง
+              // ระยะทางที่หักลบความคลาดเคลื่อนแล้ว
               const adjustedDistance = Math.max(0, dist - accuracy);
               
               if (adjustedDistance > settings.radius) {
                  outsideArea = true; 
-                 // สร้างข้อความแจ้งเตือนที่ละเอียดขึ้น
                  debugMessage = `วัดได้: ${dist.toFixed(0)} ม. (รัศมี ${settings.radius})\nGPS เพี้ยน: +/-${accuracy.toFixed(0)} ม.\nระยะคำนวณ: ${adjustedDistance.toFixed(0)} ม.`;
               }
             } else { 
@@ -264,7 +272,7 @@ export default function EmployeeCheckIn() {
             }
           } catch (e) { 
               outsideArea = true; 
-              debugMessage = "จับสัญญาณ GPS ไม่ได้ กรุณาเปิด Location และลองใหม่อีกครั้ง";
+              debugMessage = "จับสัญญาณ GPS ไม่ได้ กรุณาเปิด Location";
           }
 
           const now = dayjs();
@@ -280,16 +288,20 @@ export default function EmployeeCheckIn() {
             } else if (isCheckedIn && !isCheckedOut && !isTimeToCheckOut) {
                message.warning(`ยังไม่ถึงเวลาเช็คเอาท์ (${settings.checkoutTime} น.)`);
             } else if (!isCheckedIn) {
-               // ส่ง debugMessage ไปที่ฟังก์ชันบันทึก
                await handleCheckIn(branchName, { outsideArea, debugMessage }); 
             } else {
                message.info("วันนี้เช็คเอาท์เรียบร้อยแล้ว");
             }
-          } catch (e) { message.error("เกิดข้อผิดพลาด"); }
-
-          await stopScanner();
+          } catch (e) { 
+              console.error(e);
+              message.error("เกิดข้อผิดพลาดในการบันทึก"); 
+          }
+          
+          // ไม่ต้อง stopScanner ตรงนี้แล้ว เพราะสั่งไปตั้งแต่ต้นแล้ว
         },
-        (errorMessage) => {}
+        (errorMessage) => {
+            // ปล่อยผ่าน error เล็กน้อยขณะสแกน
+        }
       );
     } catch (e) {
       console.error(e);
@@ -297,9 +309,16 @@ export default function EmployeeCheckIn() {
     }
   };
 
+  // useEffect สำหรับ Auto Start Scanner (ปรับปรุงใหม่)
   useEffect(() => {
     const qrElement = document.getElementById("qr-reader");
-    if (settings && lineProfile && dataLoaded && qrElement && selectedEmployee) {
+
+    // ตรวจสอบว่ามี Modal ใดๆ เปิดอยู่หรือไม่
+    const isModalOpen = showSuccessModal || showLateModal || showVeryLateModal || showOutsideModal || showFirstTimeModal || showCheckoutModal;
+
+    // เงื่อนไข: ต้องโหลดข้อมูลเสร็จ, มีพนักงานเลือกแล้ว, ยังไม่เช็คอินวันนี้, และไม่มี Modal เปิดอยู่
+    if (settings && lineProfile && dataLoaded && qrElement && selectedEmployee && !todayCheckin && !isModalOpen) {
+      
       if (!html5QrCodeRef.current) {
         try {
           html5QrCodeRef.current = new Html5Qrcode("qr-reader");
@@ -307,15 +326,16 @@ export default function EmployeeCheckIn() {
           console.error("Error creating Html5Qrcode:", e);
         }
       }
+
       if (html5QrCodeRef.current && !scanning) {
          const timer = setTimeout(() => {
              startQRScan();
-         }, 500);
+         }, 800); // หน่วงเวลาเล็กน้อยเพื่อให้ UI พร้อม
          return () => clearTimeout(timer);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, lineProfile, dataLoaded, selectedEmployee]); 
+  }, [settings, lineProfile, dataLoaded, selectedEmployee, todayCheckin, showSuccessModal, showLateModal, showVeryLateModal, showOutsideModal, showCheckoutModal]); 
 
 
   const handleSelect = (value) => {
@@ -344,12 +364,9 @@ export default function EmployeeCheckIn() {
     const time = now.format("HH:mm");
     let { status, fine } = calculateStatus(time);
     
-    // 🔥 แก้ไข 3: รับข้อความแจ้งเตือน Error
     if (options.outsideArea) { 
         status = "นอกพื้นที่"; 
         fine = 0; 
-        
-        // ถ้ามี debugMessage ให้แสดงด้วย
         if (options.debugMessage) {
             setLastCheckInMessage(`❌ อยู่นอกพื้นที่\n${options.debugMessage}`);
         } else {
@@ -384,7 +401,6 @@ export default function EmployeeCheckIn() {
       
       let messageForModal = `✅ เช็คอินสำเร็จ!\nชื่อ: ${selectedEmployee.name}\nสาขา: ${branchName}\nเวลา: ${time}\nสถานะ: ${status}`;
       
-      // ถ้าไม่ได้อยู่นอกพื้นที่ ให้ใช้ข้อความปกติ
       if (!options.outsideArea) {
           setLastCheckInMessage(messageForModal);
       }
@@ -399,7 +415,6 @@ export default function EmployeeCheckIn() {
         const { lateAfterMinutes, lateThreshold2Minutes } = settings;
 
         if (options.outsideArea) {
-             // Show outside modal
              setTimeout(() => setShowOutsideModal(true), 60);
         }
         else if (totalMinutes > lateAfterMinutes && totalMinutes <= lateThreshold2Minutes) setTimeout(() => setShowLateModal(true), 60);
@@ -433,8 +448,12 @@ export default function EmployeeCheckIn() {
   const stopScanner = async () => {
     if (html5QrCodeRef.current) {
       try {
-        if (html5QrCodeRef.current.getState && html5QrCodeRef.current.getState() === 2) await html5QrCodeRef.current.stop();
-      } catch (e) {}
+        if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+        }
+      } catch (e) {
+          // Ignore stop errors if mostly stopped
+      }
       setScanning(false);
       hasScannedRef.current = false;
     }
@@ -546,7 +565,8 @@ export default function EmployeeCheckIn() {
                 </div>
             </div>
         </Card>
- {/* 3. Action Button (Scanner) */}
+        
+        {/* 3. Action Button (Scanner) */}
         <div style={{ marginBottom: 30 }}>
             {/* Hidden Scanner Div */}
             <div id="qr-reader" ref={qrRef} style={{ width: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: scanning ? 20 : 0, display: scanning ? 'block' : 'none' }} />
@@ -584,6 +604,7 @@ export default function EmployeeCheckIn() {
                 </div>
             )}
         </div>
+
         {/* 2. Today's Status Timeline */}
         {!firstTime && (
             <Card title="สถานะวันนี้" bordered={false} style={{ borderRadius: 20, boxShadow: "0 4px 15px rgba(0,0,0,0.05)", marginBottom: 20 }}>
@@ -613,8 +634,6 @@ export default function EmployeeCheckIn() {
                 </Row>
             </Card>
         )}
-
-        
 
         {/* 4. Logout / Close */}
         <div style={{ textAlign: 'center', paddingBottom: 40 }}>
