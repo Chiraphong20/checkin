@@ -1,14 +1,19 @@
 // ⚠️ ไฟล์นี้สำหรับรันบน Server/GitHub Actions เท่านั้น ห้ามใช้ในหน้าเว็บ React
 const admin = require("firebase-admin");
 const dayjs = require("dayjs");
+const utc = require('dayjs/plugin/utc'); // <--- 1. เพิ่มการ Import UTC Plugin
+dayjs.extend(utc); // <--- 2. ขยาย Dayjs ด้วย UTC Plugin
+
 require('dayjs/locale/th'); 
 
 // 1. ตั้งค่า Key (เราจะดึงจาก GitHub Secrets เพื่อความปลอดภัย)
+// ใช้ Logic ตรวจสอบค่าว่าง เพื่อป้องกัน Error: Unexpected end of JSON input
 const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT;
 if (!serviceAccountKey) {
     throw new Error("❌ FIREBASE_SERVICE_ACCOUNT is missing or empty in GitHub Secrets. Cannot connect to Firebase.");
 }
 const serviceAccount = JSON.parse(serviceAccountKey);
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -18,7 +23,6 @@ const db = admin.firestore();
 async function runCutoff() {
   const todayStr = dayjs().format("YYYY-MM-DD");
   const timestampStr = dayjs().format("YYYY-MM-DD HH:mm:ss");
-  const currentTime = dayjs(); // เวลาปัจจุบันของ Server (UTC)
 
   console.log(`Starting Cutoff check for: ${todayStr}`);
 
@@ -34,25 +38,27 @@ async function runCutoff() {
         cutoffTimeStr = sData.checkoutTime || "16:00"; // ดึงเวลา Check Out ที่ตั้งไว้
     }
 
-    // 3. กำหนดเวลาตัดยอดวันนี้ (ใช้เวลาไทย)
-   const [ch, cm] = cutoffTimeStr.split(':').map(Number);
+    // 3. กำหนดเวลาตัดยอดวันนี้ (ใช้ Timezone ไทยในการเปรียบเทียบ)
+    const [ch, cm] = cutoffTimeStr.split(':').map(Number);
     
-    // 🔥 เพิ่ม Timezone: กำหนดว่า 17:10 คือเวลาใน Bangkok (UTC+7)
+    // สร้าง dayjs object ที่มีเวลาในวันนี้ตามที่ตั้งไว้ (แต่กำหนดให้เป็น Timezone UTC+7)
+    // การใช้ true ใน utcOffset จะบอกให้ dayjs "เปลี่ยน" Timezone โดยไม่เปลี่ยนเวลาที่แสดง
     const cutoffTimeThai = dayjs().hour(ch).minute(cm).second(0).millisecond(0).utcOffset('+07:00', true);
     
-    // แปลงเวลาเปรียบเทียบของ Server (UTC) เป็น Bangkok Time
+    // แปลงเวลาปัจจุบันของ Server (UTC) เป็น Bangkok Time (UTC+7) สำหรับการเปรียบเทียบ
     const currentTimeThai = dayjs().utcOffset('+07:00', true); 
 
     console.log(`Configured Cutoff Time (Bangkok): ${cutoffTimeThai.format("HH:mm")}`);
     console.log(`Current Time (Bangkok): ${currentTimeThai.format("HH:mm")}`);
-    
+
     // 4. ตรวจสอบเงื่อนไขการตัดยอด
-    if (currentTimeThai.isBefore(cutoffTimeThai)) { // ใช้การเปรียบเทียบใน Timezone เดียวกัน
+    if (currentTimeThai.isBefore(cutoffTimeThai)) {
         console.log("Current time is before the configured cutoff time. Aborting.");
         return; 
     }
-  
-
+    
+    // ... โค้ดส่วนที่เหลือ (Logic เดิม) ...
+    // ...
     // 5. ตรวจสอบว่าได้ตัดยอดไปแล้วหรือยัง (เพื่อป้องกันรันซ้ำ)
     const hasAutoRecord = await db.collection("employee_checkin")
         .where("date", "==", todayStr)
@@ -65,7 +71,7 @@ async function runCutoff() {
         return;
     }
     
-    // 6. ดึงข้อมูลพนักงานและรายการเข้า-ลา (Logic เดิม)
+    // 6. ดึงข้อมูลพนักงานและรายการเข้า-ลา
     const empSnap = await db.collection("employees").get();
     const employees = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -91,6 +97,7 @@ async function runCutoff() {
     const batch = db.batch();
 
     absentList.forEach(emp => {
+      // ใช้ ID แบบกำหนดเอง เพื่อป้องกันการบันทึกซ้ำ
       const customDocId = `${emp.employeeId}_${todayStr}`;
       const newRef = db.collection("employee_checkin").doc(customDocId); 
       
