@@ -35,26 +35,23 @@ async function runCutoff() {
     }
 
     // 3. กำหนดเวลาตัดยอดวันนี้ (ใช้เวลาไทย)
-    // NOTE: Server รันด้วย UTC แต่อ่านค่าเวลาไทยจาก Firestore เราต้องแปลงให้ถูก
-    // วิธีง่ายที่สุดคือ ให้ถือว่าค่าที่อ่านมา (เช่น 16:00) คือเวลาปัจจุบันในวันนั้น
-    const [ch, cm] = cutoffTimeStr.split(':').map(Number);
+   const [ch, cm] = cutoffTimeStr.split(':').map(Number);
     
-    // 🔥 เราจะใช้ dayjs เพื่อสร้าง Object สำหรับเปรียบเทียบเวลา
-    // แต่ต้องระวัง Timezone ซึ่ง GitHub รันด้วย UTC ดังนั้นเราจะแค่สร้างเวลานี้ในวันปัจจุบัน
-    // และใช้การเปรียบเทียบเวลา ณ วันปัจจุบัน
+    // 🔥 เพิ่ม Timezone: กำหนดว่า 17:10 คือเวลาใน Bangkok (UTC+7)
+    const cutoffTimeThai = dayjs().hour(ch).minute(cm).second(0).millisecond(0).utcOffset('+07:00', true);
     
-    // เนื่องจาก GitHub Action รันบน UTC เราจะใช้การเปรียบเทียบง่ายๆ โดยการกำหนดเวลาปัจจุบัน
-    const cutoffTime = dayjs().hour(ch).minute(cm).second(0).millisecond(0);
-    
-    console.log(`Configured Cutoff Time (HH:mm): ${cutoffTimeStr}`);
-    console.log(`Current Time (UTC): ${currentTime.format("HH:mm")}`);
-    console.log(`Cutoff Threshold Time (UTC): ${cutoffTime.format("HH:mm")}`);
+    // แปลงเวลาเปรียบเทียบของ Server (UTC) เป็น Bangkok Time
+    const currentTimeThai = dayjs().utcOffset('+07:00', true); 
 
+    console.log(`Configured Cutoff Time (Bangkok): ${cutoffTimeThai.format("HH:mm")}`);
+    console.log(`Current Time (Bangkok): ${currentTimeThai.format("HH:mm")}`);
+    
     // 4. ตรวจสอบเงื่อนไขการตัดยอด
-    if (currentTime.isBefore(cutoffTime)) {
+    if (currentTimeThai.isBefore(cutoffTimeThai)) { // ใช้การเปรียบเทียบใน Timezone เดียวกัน
         console.log("Current time is before the configured cutoff time. Aborting.");
-        return; // เวลายังไม่ถึง ให้ออกจากการทำงาน
+        return; 
     }
+  
 
     // 5. ตรวจสอบว่าได้ตัดยอดไปแล้วหรือยัง (เพื่อป้องกันรันซ้ำ)
     const hasAutoRecord = await db.collection("employee_checkin")
