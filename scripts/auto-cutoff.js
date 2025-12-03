@@ -4,8 +4,11 @@ const dayjs = require("dayjs");
 require('dayjs/locale/th'); 
 
 // 1. ตั้งค่า Key (เราจะดึงจาก GitHub Secrets เพื่อความปลอดภัย)
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
+const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT;
+if (!serviceAccountKey) {
+    throw new Error("❌ FIREBASE_SERVICE_ACCOUNT is missing or empty in GitHub Secrets. Cannot connect to Firebase.");
+}
+const serviceAccount = JSON.parse(serviceAccountKey);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
