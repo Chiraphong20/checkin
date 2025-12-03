@@ -38,7 +38,7 @@ export default function LeaveBalance() {
   });
   
   const [historyList, setHistoryList] = useState([]); 
-  const [holidayList, setHolidayList] = useState([]); // ✅ เพิ่ม State เก็บวันหยุดนักขัตฤกษ์
+  const [holidayList, setHolidayList] = useState([]); 
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
@@ -68,9 +68,8 @@ export default function LeaveBalance() {
         const holidaysSnap = await getDocs(qHolidays);
         const publicHolidaysData = holidaysSnap.docs.map(d => d.data());
         
-        // Filter เฉพาะปีปัจจุบัน
         const currentYear = dayjs().format("YYYY");
-        const thisYearHolidays = publicHolidaysData.filter(h => h.date.startsWith(currentYear));
+        const thisYearHolidays = publicHolidaysData.filter(h => h.date && h.date.startsWith(currentYear));
         setHolidayList(thisYearHolidays);
 
         // 3. ดึงประวัติการลา/ขาด
@@ -84,40 +83,45 @@ export default function LeaveBalance() {
 
         // A. จาก Checkin
         checkIns.forEach(item => {
-            const isOff = item.status && (
-                item.status.includes("หยุด") || item.status.includes("ขาด") || 
-                item.status.includes("สายมาก") || item.status.includes("ลา")
-            );
-            if (isOff && item.date.startsWith(currentYear)) {
-                allRecords.push({ date: item.date, type: "checkin", status: item.status });
+            const statusStr = item.status || ""; // ✅ ป้องกัน null
+            const isOff = statusStr.includes("หยุด") || statusStr.includes("ขาด") || 
+                          statusStr.includes("สายมาก") || statusStr.includes("ลา");
+            
+            if (isOff && item.date && item.date.startsWith(currentYear)) {
+                allRecords.push({ date: item.date, type: "checkin", status: statusStr });
             }
         });
 
         // B. จาก Leave
         leaves.forEach(l => {
-            const start = dayjs(l.start || l.date);
-            const end = dayjs(l.end || l.date);
-            let curr = start;
-            while(curr.isSameOrBefore(end, 'day')) {
-                const dStr = curr.format("YYYY-MM-DD");
-                if (dStr.startsWith(currentYear)) {
-                    if (!allRecords.find(r => r.date === dStr)) {
-                        allRecords.push({ 
-                            date: dStr, 
-                            type: "leave", 
-                            status: l.type, 
-                            reason: l.reason 
-                        });
+            const startDateStr = l.start || l.date;
+            const endDateStr = l.end || l.date;
+            
+            if (startDateStr) {
+                const start = dayjs(startDateStr);
+                const end = dayjs(endDateStr);
+                let curr = start;
+                while(curr.isSameOrBefore(end, 'day')) {
+                    const dStr = curr.format("YYYY-MM-DD");
+                    if (dStr.startsWith(currentYear)) {
+                        if (!allRecords.find(r => r.date === dStr)) {
+                            allRecords.push({ 
+                                date: dStr, 
+                                type: "leave", 
+                                status: l.type || "ลาหยุด", // ✅ ป้องกัน null 
+                                reason: l.reason 
+                            });
+                        }
                     }
+                    curr = curr.add(1, 'day');
                 }
-                curr = curr.add(1, 'day');
             }
         });
 
         // C. เพิ่มวันหยุดนักขัตฤกษ์ลงในประวัติ (เฉพาะ Office/Admin)
         if (isOffice) {
             publicHolidaysData.forEach(h => {
-                if (h.date.startsWith(currentYear)) {
+                if (h.date && h.date.startsWith(currentYear)) {
                     if (!allRecords.find(r => r.date === h.date)) {
                         allRecords.push({
                             date: h.date,
@@ -137,11 +141,11 @@ export default function LeaveBalance() {
 
         // 1. พักร้อน
         let annualTotal = 0;
-        let annualUsed = 0;
         if (yearsOfService >= 1) {
             annualTotal = isOffice ? 6 : 11;
         }
-        annualUsed = allRecords.filter(r => r.status && r.status.includes("พักร้อน")).length;
+        // ✅ ป้องกัน Crash ตรงนี้ด้วย ?.
+        const annualUsed = allRecords.filter(r => r.status?.includes("พักร้อน")).length;
 
         // 2. โควตารายเดือน
         let monthlyQuota = 0;
@@ -158,7 +162,8 @@ export default function LeaveBalance() {
             usedMonth = allRecords.filter(r => {
                 const isThisMonth = r.date.startsWith(currentMonthStr);
                 const isHoliday = r.type === "holiday"; 
-                const isVacation = r.status.includes("พักร้อน");
+                // ✅ ป้องกัน null
+                const isVacation = r.status?.includes("พักร้อน"); 
                 return isThisMonth && !isHoliday && !isVacation;
             }).length;
 
@@ -170,8 +175,10 @@ export default function LeaveBalance() {
                 const loopMonth = dayjs().month(m);
                 const monthStr = loopMonth.format("YYYY-MM");
                 let q = (m === 1) ? 4 : 5; 
+                
+                // ✅ ป้องกัน null
                 const usedInLoop = allRecords.filter(r => 
-                    r.date.startsWith(monthStr) && !r.status.includes("พักร้อน")
+                    r.date.startsWith(monthStr) && !r.status?.includes("พักร้อน")
                 ).length;
 
                 if (m === now.month()) {
@@ -206,7 +213,8 @@ export default function LeaveBalance() {
         setLoading(false);
 
       } catch (err) {
-        console.error(err);
+        console.error("LeaveBalance Error:", err); // ✅ Log Error ดูใน Console
+        message.error("เกิดข้อผิดพลาดในการคำนวณวันหยุด");
         setLoading(false);
       }
     };
@@ -303,7 +311,7 @@ export default function LeaveBalance() {
              </Flex>
         </Card>
 
-        {/* ✅ Card 3: วันหยุดนักขัตฤกษ์ (ปีนี้) */}
+        {/* Card 3: วันหยุดนักขัตฤกษ์ (ปีนี้) */}
         <Card 
             title={<><StarFilled style={{ color: '#ffc107', marginRight: 8 }} /> วันหยุดนักขัตฤกษ์ (ปีนี้)</>}
             bordered={false} 
