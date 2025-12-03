@@ -9,13 +9,10 @@ import {
   Statistic,
   Select,
   Tag,
-  Button,
-  Modal,
   Alert,
   Typography,
-  theme,
   Avatar,
-  notification // เพิ่ม notification สำหรับแจ้งเตือน Auto
+  notification
 } from "antd";
 import { 
     UserOutlined, 
@@ -28,7 +25,8 @@ import {
     CheckCircleFilled
 } from "@ant-design/icons";
 import { db } from "../firebase"; 
-import { collection, getDocs, addDoc, doc, getDoc } from "firebase/firestore";
+// ✅ เปลี่ยน import: เพิ่ม setDoc และ doc
+import { collection, getDocs, setDoc, doc, getDoc } from "firebase/firestore";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import "dayjs/locale/th";
@@ -51,17 +49,13 @@ const Dashboard = () => {
   // --- State สำหรับระบบตัดยอด (Auto-Cutoff) ---
   const [processing, setProcessing] = useState(false);
   const [fineAmount, setFineAmount] = useState(50);
-  const [cutoffTimeStr, setCutoffTimeStr] = useState("16:00"); // ตั้งเวลา Default เป็น 16:00
+  const [cutoffTimeStr, setCutoffTimeStr] = useState("16:00"); 
   const [isCutoffDone, setIsCutoffDone] = useState(false);
   
   const [todayString, setTodayString] = useState(dayjs().format("D MMMM YYYY เวลา HH:mm น."));
 
   // State สำหรับ Filter จาก Card
   const [filterType, setFilterType] = useState(null); 
-
-  // Modal Hook
-  const [modal, contextHolder] = Modal.useModal();
-  const { token } = theme.useToken();
 
   // Update Clock
   useEffect(() => {
@@ -103,7 +97,6 @@ const Dashboard = () => {
 
       } catch (err) {
         console.error(err);
-        // message.error("โหลดข้อมูลล้มเหลว"); // ปิดไว้เพื่อไม่ให้รบกวนตอน Auto Refresh
       } finally {
         setLoading(false);
       }
@@ -113,7 +106,7 @@ const Dashboard = () => {
   useEffect(() => {
     setLoading(true);
     fetchAllData();
-    const interval = setInterval(fetchAllData, 60000); // รีเฟรชทุก 1 นาที
+    const interval = setInterval(fetchAllData, 60000); 
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
@@ -123,10 +116,9 @@ const Dashboard = () => {
   const absentEmployeesList = useMemo(() => {
       const todayStr = dayjs().format("YYYY-MM-DD");
       
-      // หาคนที่ "ไม่มีเช็คอินวันนี้" และ "ไม่มีใบลาวันนี้"
       const missing = employees.filter(emp => {
           const hasCheckin = checkins.find(c => c.employeeId === emp.employeeId && c.date === todayStr);
-          // เช็ควันลา (รองรับทั้งแบบ date เดียว และช่วง start-end)
+          
           const hasLeave = leaves.find(l => {
              const start = dayjs(l.start || l.date);
              const end = dayjs(l.end || l.date);
@@ -136,7 +128,7 @@ const Dashboard = () => {
           return !hasCheckin && !hasLeave;
       }).map(emp => ({
           ...emp,
-          status: 'ขาดงาน' // สถานะที่จะบันทึก
+          status: 'ขาดงาน'
       }));
       return missing;
   }, [employees, checkins, leaves]);
@@ -144,14 +136,13 @@ const Dashboard = () => {
   // ตรวจสอบว่าวันนี้ตัดยอดไปหรือยัง
   useEffect(() => {
       const todayStr = dayjs().format("YYYY-MM-DD");
-      // เช็คว่ามี Record ไหนของวันนี้ที่ถูกตัดยอด Auto ไปแล้วหรือไม่
       const hasAutoRecord = checkins.some(c => c.date === todayStr && c.isAutoAbsent === true);
       
       const now = dayjs();
       const [cutoffHour, cutoffMinute] = cutoffTimeStr.split(':').map(Number);
       const cutoffTimeDate = dayjs().hour(cutoffHour).minute(cutoffMinute).second(0);
 
-      // ถ้ามี Record Auto แล้ว หรือ เลยเวลาแล้วและไม่เหลือคนขาดงาน = เสร็จแล้ว
+      // ✅ เพิ่มเงื่อนไข !processing เข้าไปเพื่อให้แน่ใจว่าไม่ได้กำลังทำงานอยู่
       if (hasAutoRecord || (now.isAfter(cutoffTimeDate) && absentEmployeesList.length === 0)) {
           setIsCutoffDone(true);
       } else {
@@ -163,28 +154,29 @@ const Dashboard = () => {
   // ⚙️ Auto Cutoff Logic (ทำงานทุก 1 นาที)
   // ---------------------------------------------------------
   useEffect(() => {
-    if (loading || processing) return;
+    // ✅ เพิ่มเงื่อนไข !isCutoffDone เข้าไป ถ้าเสร็จแล้วไม่ต้องเช็คซ้ำ
+    if (loading || processing || isCutoffDone) return;
 
     const checkAutoProcess = async () => {
         const now = dayjs();
         const [cutoffHour, cutoffMinute] = cutoffTimeStr.split(':').map(Number);
         const cutoffTimeDate = dayjs().hour(cutoffHour).minute(cutoffMinute).second(0);
 
-        // เงื่อนไข: เวลาปัจจุบัน > เวลาตัดยอด AND ยังมีคนขาดงานค้างอยู่
         if (now.isAfter(cutoffTimeDate) && absentEmployeesList.length > 0) {
             console.log(`⚡ Auto-processing Absences... Time: ${now.format('HH:mm')}`);
             await executeAutoCutoff(); 
         }
     };
 
-    // เช็คทันทีและตั้ง Interval
     checkAutoProcess();
     const timer = setInterval(checkAutoProcess, 60000); 
 
     return () => clearInterval(timer);
-  }, [loading, absentEmployeesList, processing, cutoffTimeStr]); // เอา isCutoffDone ออกเพื่อให้เช็คซ้ำได้กรณีข้อมูลใหม่มา
+  }, [loading, absentEmployeesList, processing, cutoffTimeStr, isCutoffDone]); 
 
-  // ฟังก์ชันยิงข้อมูลลง DB (ทำงานอัตโนมัติ)
+  // ---------------------------------------------------------
+  // 🔹 ฟังก์ชันยิงข้อมูลลง DB (แก้เป็น setDoc เพื่อกันซ้ำ)
+  // ---------------------------------------------------------
   const executeAutoCutoff = async () => {
     setProcessing(true);
     try {
@@ -192,7 +184,12 @@ const Dashboard = () => {
         const timestampStr = dayjs().format("YYYY-MM-DD HH:mm:ss");
         
         const promises = absentEmployeesList.map(emp => {
-            return addDoc(collection(db, "employee_checkin"), {
+            // 🔥 สร้าง ID แบบกำหนดเอง: รหัสพนักงาน_วันที่
+            // ถ้าบันทึกซ้ำ มันจะทับ ID เดิม ไม่เกิด record ใหม่
+            const customDocId = `${emp.employeeId}_${todayStr}`;
+            
+            // ✅ ใช้ setDoc แทน addDoc
+            return setDoc(doc(db, "employee_checkin", customDocId), {
                 employeeId: emp.employeeId,
                 name: emp.name,
                 department: emp.department || "",
@@ -202,15 +199,14 @@ const Dashboard = () => {
                 checkoutTime: "-",
                 timestamp: timestampStr,
                 status: "ขาดงาน", 
-                fine: fineAmount, // ค่าปรับ 50 บาท
-                isAutoAbsent: true, // Flag บอกว่าระบบตัดให้
+                fine: fineAmount, 
+                isAutoAbsent: true, 
                 isManual: false
             });
         });
 
         await Promise.all(promises);
         
-        // แจ้งเตือนมุมขวาบน
         notification.success({
             message: 'ตัดยอดอัตโนมัติสำเร็จ',
             description: `ระบบบันทึกขาดงาน ${absentEmployeesList.length} คน (ค่าปรับ ${fineAmount} บาท/คน)`,
@@ -218,19 +214,18 @@ const Dashboard = () => {
             duration: 5,
         });
 
-        // โหลดข้อมูลใหม่เพื่อให้ตารางอัปเดตทันที
         fetchAllData(); 
 
     } catch (err) {
         console.error(err);
-        message.error("Auto Cutoff Failed");
+        // message.error("Auto Cutoff Failed");
     } finally {
         setProcessing(false);
     }
   };
 
   // ---------------------------------------------------------
-  // 🔹 Logic การ Filter ข้อมูลสำหรับ Table (UI เดิม)
+  // 🔹 Logic การ Filter ข้อมูลสำหรับ Table
   // ---------------------------------------------------------
   const branchOptions = useMemo(
     () => [
@@ -308,7 +303,6 @@ const Dashboard = () => {
         const emp = employees.find((e) => e.employeeId === item.employeeId);
         let status = item.status;
 
-        // นอกพื้นที่
         if (!item.__isLeave && emp) {
           const empBranches = Array.isArray(emp.branches) ? emp.branches : emp.branch ? [emp.branch] : [];
           if (item.branch && empBranches.length > 0 && !empBranches.includes(item.branch)) {
@@ -371,13 +365,8 @@ const Dashboard = () => {
       rec.history.push(item);
 
       if (item.status?.includes("สาย")) rec.summary.late += 1;
-      
-      if (item.status?.includes("หยุด") || item.status?.includes("ลา")) {
-        rec.summary.leave += 1;
-      }
-      
+      if (item.status?.includes("หยุด") || item.status?.includes("ลา")) rec.summary.leave += 1;
       if (item.status === "นอกพื้นที่") rec.summary.outside += 1;
-      
       if (item.status === "ขาดงาน") { 
           rec.summary.absent += 1; 
           rec.summary.fine += parseInt(item.fine) || 0;
@@ -402,7 +391,7 @@ const Dashboard = () => {
             if (filterType === 'checkin') return item.checkinTime !== "-";
             if (filterType === 'checkout') return item.checkoutTime !== "-";
             if (filterType === 'late') return item.status?.includes("สาย");
-            if (filterType === 'absent') return item.status?.includes("ลา") || item.status?.includes("หยุด") || item.status === "ขาดงาน";
+            if (filterType === 'absent') return item.status?.includes("ลา") || item.status === "ขาดงาน";
             if (filterType === 'outside') return item.status === "นอกพื้นที่";
         } else {
             if (filterType === 'checkin') return item.history.some(h => h.checkinTime !== "-");
@@ -464,23 +453,43 @@ const Dashboard = () => {
 
   const todayColumns = [
     { title: "รหัส", dataIndex: "employeeId", width: 100 },
-    { title: "ชื่อ - สกุล", dataIndex: "name", width: 180 },
+    { 
+        title: "ชื่อ - สกุล", 
+        dataIndex: "name", 
+        render: (text, record) => (
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+                <Avatar icon={<UserOutlined />} src={record.pictureUrl} />
+                <div>{text}</div>
+            </div>
+        )
+    },
     { title: "สาขา", dataIndex: "branch", width: 150 },
-    { title: "เวลาเข้า", dataIndex: "checkinTime", width: 110 },
-    { title: "เวลาเช็คเอาท์", dataIndex: "checkoutTime", width: 110 },
+    { 
+        title: "เวลาเข้า", 
+        dataIndex: "checkinTime", 
+        align: 'center',
+        render: (t) => t !== "-" ? <Tag color="blue">{t}</Tag> : <span style={{color:'#ccc'}}>-</span>
+    },
+    { 
+        title: "เวลาออก", 
+        dataIndex: "checkoutTime",
+        align: 'center',
+        render: (t) => t !== "-" ? <Tag color="cyan">{t}</Tag> : <span style={{color:'#ccc'}}>-</span>
+    },
     {
       title: "สถานะ",
       dataIndex: "status",
-      width: 160,
+      align: 'center',
       render: (text, record) => {
         let color = "green";
         if (text?.includes("สาย")) color = "orange";
-        if (text?.includes("ลา") || text?.includes("หยุด") || text?.includes("ขาดงาน")) color = "red";
+        if (text?.includes("ลา")) color = "blue";
+        if (text === "ขาดงาน") color = "red";
         if (text?.includes("นอกพื้นที่")) color = "purple";
         return (
-            <div style={{display:'flex', flexDirection:'column'}}>
+            <div style={{display:'flex', flexDirection:'column', alignItems:'center'}}>
                 <Tag color={color}>{text}</Tag>
-                {record.isAutoAbsent && <small style={{color:'red', fontSize:10}}>*Auto</small>}
+                {record.isAutoAbsent && <small style={{color:'red', fontSize:10}}>Auto</small>}
             </div>
         );
       },
@@ -488,8 +497,8 @@ const Dashboard = () => {
     {
       title: "ค่าปรับ",
       dataIndex: "fine",
-      width: 80,
-      render: (f) => (f > 0 ? `${f}` : "-"),
+      align: 'right',
+      render: (f) => (f > 0 ? <Text type="danger">{f} ฿</Text> : "-"),
     },
   ];
 
@@ -569,8 +578,6 @@ const Dashboard = () => {
 
   return (
     <div style={{ padding: "0" }}>
-      {contextHolder}
-
       {loading && (
         <Spin
           size="large"
@@ -595,20 +602,31 @@ const Dashboard = () => {
         <div>
            {isCutoffDone ? (
               <Alert 
-                message="ระบบได้ทำการตัดยอดขาดงานประจำวันเรียบร้อยแล้ว" 
-                type="success" 
-                showIcon 
-                style={{ marginBottom: 0, border: 'none' }} 
-              />
+                message="สถานะการตัดยอดประจำวัน"
+                description={
+                    <span>
+                        <CheckCircleFilled style={{ color: '#52c41a', marginRight: 8 }} />
+                        <b>ระบบได้ทำการตัดยอดประจำวันเรียบร้อยแล้ว</b> (พนักงานที่ไม่มาและไม่ลา ถูกบันทึกเป็น "ขาดงาน")
+                    </span>
+                }
+                type="success"
+                showIcon={false}
+                style={{ borderLeft: '5px solid #52c41a' }}
+             />
            ) : (
               <Alert 
-                message={`ระบบจะตัดยอดขาดงานอัตโนมัติหลังเวลา ${cutoffTimeStr} น.`} 
-                description={absentEmployeesList.length > 0 ? `(รอตรวจสอบ: ${absentEmployeesList.length} คน)` : ""}
-                type="info" 
-                showIcon 
-                icon={<ClockCircleOutlined />} 
-                style={{ marginBottom: 0, border: 'none' }} 
-              />
+                message="รอการตัดยอดอัตโนมัติ"
+                description={
+                    <span>
+                        <InfoCircleOutlined style={{ color: '#1890ff', marginRight: 8 }} />
+                        ระบบจะตัดยอดอัตโนมัติหลังเวลา <b>{cutoffTimeStr} น.</b> (ขาดงานปรับ {fineAmount} บาท)
+                        {absentEmployeesList.length > 0 && <span style={{marginLeft: 10}}> | ⚠️ <b>รอตัดยอด: {absentEmployeesList.length} คน</b></span>}
+                    </span>
+                }
+                type="info"
+                showIcon={false}
+                style={{ borderLeft: '5px solid #1890ff' }}
+            />
            )}
         </div>
       </Card>
@@ -681,7 +699,7 @@ const Dashboard = () => {
       </Card>
 
       {/* MAIN TABLE */}
-      <Card style={{ borderRadius: 12 }} styles={{ body: { padding: 24 } }}>
+      <Card style={{ borderRadius: 12 }} styles={{ body: { padding: 24 } }} title="รายการลงเวลา">
         <div style={{ marginBottom: 20 }}>
           <span style={{ marginRight: 12, fontWeight: 500 }}>สาขา :</span>
           <Select
@@ -693,7 +711,6 @@ const Dashboard = () => {
             showSearch
             optionFilterProp="label"
           />
-          {/* ❌ ลบปุ่มกดบันทึกขาดงานออกแล้วตามที่ต้องการ */}
         </div>
  
         <Table
