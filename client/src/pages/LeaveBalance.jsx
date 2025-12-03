@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Card, Typography, Spin, message, Flex, Progress, Button, Modal, List, Avatar, Divider, Statistic, Tag } from "antd";
-import { UserOutlined, CalendarOutlined, FileTextOutlined, ClockCircleOutlined, StarFilled } from "@ant-design/icons"; // ✅ เพิ่ม StarFilled
+import { UserOutlined, CalendarOutlined, FileTextOutlined, ClockCircleOutlined, StarFilled } from "@ant-design/icons";
 import liff from "@line/liff"; 
 import { db } from "../firebase"; 
 import { collection, query, where, getDocs } from "firebase/firestore"; 
@@ -26,7 +26,6 @@ export default function LeaveBalance() {
   const [loading, setLoading] = useState(true);
   const [employee, setEmployee] = useState(null);
   
-  // State เก็บข้อมูลวันลาและโควต้า
   const [leaveData, setLeaveData] = useState({
     monthlyQuota: 0,
     accumulatedQuota: 0,
@@ -61,26 +60,21 @@ export default function LeaveBalance() {
         empData.pictureUrl = profile.pictureUrl || empData.profileImage;
         setEmployee(empData);
 
-        // ✅ ตรวจสอบสิทธิ์ (Office/Admin)
         const isOffice = ["01", "02"].includes(empData.department);
 
-        // 2. ดึงข้อมูลวันหยุดนักขัตฤกษ์ (แก้ไขให้เก็บทั้ง Object)
+        // 2. ดึงข้อมูลวันหยุดนักขัตฤกษ์
         const holidaysSnap = await getDocs(collection(db, "public_holidays"));
-        const publicHolidaysData = holidaysSnap.docs.map(d => d.data()); // เก็บ { date, title }
-        const publicHolidayDates = publicHolidaysData.map(h => h.date);  // เก็บเฉพาะวันที่ string สำหรับคำนวณ
+        const publicHolidaysData = holidaysSnap.docs.map(d => d.data()); // { date, title }
 
-        // 3. ดึงประวัติการลา/ขาด ทั้งหมดในปีนี้
+        // 3. ดึงประวัติการลา/ขาด (รายปี)
         const currentYear = dayjs().format("YYYY");
         
-        // ดึง Checkin
         const checkInQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", empData.employeeId));
         const checkIns = (await getDocs(checkInQuery)).docs.map(d => d.data());
 
-        // ดึง Leave
         const leaveQuery = query(collection(db, "employee_leave"), where("employeeId", "==", empData.employeeId));
         const leaves = (await getDocs(leaveQuery)).docs.map(d => d.data());
 
-        // --- ประมวลผลประวัติการลาทั้งหมด ---
         let allRecords = [];
 
         // A. จาก Checkin
@@ -115,30 +109,28 @@ export default function LeaveBalance() {
             }
         });
 
-        // 🔥 C. เพิ่มวันหยุดนักขัตฤกษ์ลงในประวัติ (เฉพาะ Office/Admin)
+        // C. เพิ่มวันหยุดนักขัตฤกษ์ (เฉพาะ Office/Admin)
         if (isOffice) {
             publicHolidaysData.forEach(h => {
                 if (h.date.startsWith(currentYear)) {
-                    // เพิ่มลงในรายการแสดงผล แต่ต้องเช็คไม่ให้ซ้ำกับวันที่ลงลาไปแล้ว (เผื่อมีการลงซ้ำซ้อน)
-                    // แต่โดยปกติวันหยุดนักขัตฤกษ์ จะแยกออกมาให้เห็นชัดๆ
                     if (!allRecords.find(r => r.date === h.date)) {
                         allRecords.push({
                             date: h.date,
-                            type: "holiday", // ประเภทใหม่
+                            type: "holiday",
                             status: "วันหยุดนักขัตฤกษ์",
-                            reason: h.title // ชื่อวันหยุด เช่น วันสงกรานต์
+                            reason: h.title
                         });
                     }
                 }
             });
         }
 
-        // --- เริ่มคำนวณโควต้า ---
+        // --- คำนวณโควต้า ---
         const startWork = empData.startDate ? dayjs(empData.startDate) : dayjs();
         const yearsOfService = dayjs().diff(startWork, 'year', true);
         const currentMonthStr = dayjs().format("YYYY-MM");
 
-        // 1. คำนวณพักร้อน
+        // 1. พักร้อน (Annual Leave)
         let annualTotal = 0;
         let annualUsed = 0;
         if (yearsOfService >= 1) {
@@ -146,50 +138,62 @@ export default function LeaveBalance() {
         }
         annualUsed = allRecords.filter(r => r.status && r.status.includes("พักร้อน")).length;
 
-        // 2. คำนวณวันหยุดรายเดือน
+        // 2. โควตารายเดือน (Monthly & Accumulated)
         let monthlyQuota = 0;
         let accumulatedQuota = 0; 
         let usedMonth = 0;
 
-        const countWeekends = (month) => {
-            let count = 0;
-            const daysInMonth = month.daysInMonth();
-            for(let i=1; i<=daysInMonth; i++) {
-                const d = month.date(i);
-                const dayOfWeek = d.day(); 
-                if (dayOfWeek === 0 || dayOfWeek === 6) count++;
-            }
-            return count;
-        };
-
         if (isOffice) {
-            // === Office / Admin ===
-            monthlyQuota = countWeekends(dayjs());
+            // === Office / Admin (01, 02) ===
+            // นับเสาร์-อาทิตย์
+            const daysInMonth = dayjs().daysInMonth();
+            for(let i=1; i<=daysInMonth; i++) {
+                const d = dayjs().date(i);
+                if (d.day() === 0 || d.day() === 6) monthlyQuota++;
+            }
             
-            // นับวันที่ใช้ (ไม่นับวันนักขัตฤกษ์ และ ไม่นับพักร้อน)
+            // นับที่ใช้จริง (ไม่รวมนักขัตฤกษ์/พักร้อน)
             usedMonth = allRecords.filter(r => {
                 const isThisMonth = r.date.startsWith(currentMonthStr);
-                const isHoliday = r.type === "holiday"; // เช็คจาก type ที่เราเพิ่งใส่ไป (หรือเช็คจาก date ก็ได้)
+                const isHoliday = r.type === "holiday"; 
                 const isVacation = r.status.includes("พักร้อน");
-                
-                // ต้องเป็นเดือนนี้ + ไม่ใช่วันหยุดนักขัตฤกษ์ + ไม่ใช่พักร้อน
                 return isThisMonth && !isHoliday && !isVacation;
             }).length;
 
         } else {
-            // === Sales / Transport ===
-            const currentMonthIndex = dayjs().month();
-            monthlyQuota = (currentMonthIndex === 1) ? 4 : 5; 
-            accumulatedQuota = 0;
-            usedMonth = allRecords.filter(r => 
-                r.date.startsWith(currentMonthStr) && !r.status.includes("พักร้อน")
-            ).length;
+            // === Sales / Transport (03, 04) ===
+            // 🔥 กู้คืน Logic คำนวณสะสม (Loop ตั้งแต่มกราคม)
+            const now = dayjs();
+            let tempQuota = 0;
+
+            for (let m = 0; m <= now.month(); m++) {
+                const loopMonth = dayjs().month(m);
+                const monthStr = loopMonth.format("YYYY-MM");
+                
+                // โควต้า: ก.พ. = 4, อื่นๆ = 5
+                let q = (m === 1) ? 4 : 5; 
+                
+                // ใช้ไปเท่าไหร่ (ไม่รวมพักร้อน)
+                const usedInLoop = allRecords.filter(r => 
+                    r.date.startsWith(monthStr) && !r.status.includes("พักร้อน")
+                ).length;
+
+                if (m === now.month()) {
+                    // เดือนปัจจุบัน
+                    accumulatedQuota = tempQuota; // ยอดสะสมยกมา
+                    monthlyQuota = q;             // ยอดใหม่เดือนนี้
+                    usedMonth = usedInLoop;       // ใช้ไปเดือนนี้
+                } else {
+                    // เดือนก่อนหน้า: เหลือเท่าไหร่ทบไป
+                    const remain = Math.max(0, q - usedInLoop);
+                    tempQuota += remain;
+                }
+            }
         }
 
         const remainingQuota = (monthlyQuota + accumulatedQuota) - usedMonth;
 
-        // เตรียมข้อมูลประวัติสำหรับ Modal (เฉพาะเดือนนี้)
-        // เรียงวันที่ ใหม่ -> เก่า
+        // ประวัติการลา (เดือนนี้)
         const history = allRecords
             .filter(r => r.date.startsWith(currentMonthStr))
             .sort((a,b) => dayjs(b.date).diff(dayjs(a.date))); 
@@ -210,7 +214,6 @@ export default function LeaveBalance() {
 
       } catch (err) {
         console.error(err);
-        message.error("เกิดข้อผิดพลาดในการดึงข้อมูล");
         setLoading(false);
       }
     };
@@ -224,20 +227,13 @@ export default function LeaveBalance() {
   const totalAvailable = leaveData.monthlyQuota + leaveData.accumulatedQuota;
   const percent = totalAvailable > 0 ? (leaveData.usedLeaveMonth / totalAvailable) * 100 : 0;
 
-  // Helper เลือกสีและไอคอน
   const getStatusInfo = (item) => {
       const status = item.status || "";
-      
-      // กรณีวันหยุดนักขัตฤกษ์
-      if (item.type === "holiday") {
-          return { color: "purple", icon: <StarFilled />, text: item.reason || "วันหยุดนักขัตฤกษ์" };
-      }
-
+      if (item.type === "holiday") return { color: "purple", icon: <StarFilled />, text: item.reason || "วันหยุดนักขัตฤกษ์" };
       if (status.includes("ป่วย")) return { color: "blue", icon: <FileTextOutlined />, text: status };
       if (status.includes("พักร้อน")) return { color: "cyan", icon: <FileTextOutlined />, text: status };
       if (status.includes("กิจ")) return { color: "green", icon: <FileTextOutlined />, text: status };
       if (status.includes("ขาด") || status.includes("สายมาก")) return { color: "red", icon: <ClockCircleOutlined />, text: status };
-      
       return { color: "orange", icon: <FileTextOutlined />, text: status };
   };
 
@@ -278,7 +274,7 @@ export default function LeaveBalance() {
                         suffix="วัน" 
                         valueStyle={{ fontSize: 18 }} 
                      />
-                     {!leaveData.isPrivileged && leaveData.accumulatedQuota > 0 && (
+                     {!leaveData.isPrivileged && (
                         <div style={{ marginTop: 5 }}>
                             <Text type="secondary" style={{ fontSize: 12 }}>+ สะสมยกมา: {leaveData.accumulatedQuota} วัน</Text>
                         </div>
@@ -294,7 +290,7 @@ export default function LeaveBalance() {
             <Button type="dashed" block onClick={() => setIsModalOpen(true)} icon={<FileTextOutlined />}>ดูประวัติการหยุด</Button>
         </Card>
 
-        {/* Card 2: วันพักร้อน (Annual Leave) */}
+        {/* Card 2: พักร้อน */}
         <Card bordered={false} style={{ borderRadius: 16, marginBottom: 20, background: "linear-gradient(to right, #e6f7ff, #ffffff)" }}>
              <Flex justify="space-between" align="center">
                 <div>
@@ -348,7 +344,6 @@ export default function LeaveBalance() {
                       description={
                           <div style={{ marginTop: 2 }}>
                               <Tag color={info.color}>{info.text}</Tag>
-                              {/* ถ้าเป็นวันหยุดนักขัตฤกษ์ ไม่ต้องโชว์ reason ซ้ำ เพราะมันอยู่ใน Tag แล้ว */}
                               {item.type !== 'holiday' && item.reason && <Text type="secondary" style={{ fontSize: 12 }}>({item.reason})</Text>}
                           </div>
                       }
