@@ -2,10 +2,17 @@ name: Daily Absent Cutoff
 
 on:
   schedule:
-    # ตั้งเวลาทำงาน (UTC Time)
-    # ประเทศไทยคือ UTC+7 ดังนั้น 17:00 น. ไทย คือ 10:00 UTC
-    # รูปแบบ Cron: นาที ชั่วโมง วัน เดือน วันในสัปดาห์
-    - cron: '0 10 * * *' 
+    # ตั้งเวลาทำงานถี่ขึ้น เพื่อให้แน่ใจว่าไป "กระแทก" เวลาที่ตั้งไว้ใน Setting
+    # UTC (ช้ากว่าไทย 7 ชม.)
+    # เวลาที่แนะนำ: รันทุก 30 นาที ตั้งแต่ 9:30 น. - 16:30 น. UTC (16:30 น. - 23:30 น. ไทย)
+    
+    # 02:00 UTC = 09:00 น. ไทย (รอบเช้า เพื่อความปลอดภัย)
+    - cron: '0 2 * * *' 
+    
+    # รันทุก 30 นาที ระหว่าง 9:30 - 16:30 UTC (ช่วงเย็นถึงค่ำไทย)
+    - cron: '30 9-16/1 * * *'  # 9:30, 10:30, 11:30, ..., 16:30 UTC
+    - cron: '0 10-17/1 * * *'  # 10:00, 11:00, 12:00, ..., 17:00 UTC
+    
   workflow_dispatch: # เพื่อให้กดรันเล่นได้ด้วย
 
 jobs:
@@ -25,6 +32,5 @@ jobs:
 
       - name: Run Cutoff Script
         env:
-          # เราจะเอา JSON Key ไปใส่ใน GitHub Secrets ชื่อ FIREBASE_SERVICE_ACCOUNT
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/auto-cutoff.js
