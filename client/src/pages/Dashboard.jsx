@@ -337,11 +337,11 @@ const Dashboard = () => {
   }, [todayData, groupedRangeData, filterType, selectedRange]);
 
   const summaryStats = useMemo(() => {
-    let late = 0, absent = 0, outside = 0, checkinsCount = 0, checkoutsCount = 0;
+  let late = 0, absent = 0, outside = 0, checkinsCount = 0, checkoutsCount = 0;
 
-    if (selectedRange === "today") {
-      todayData.forEach((d) => {
-        if (d.checkinTime !== "-") checkinsCount++;
+  if (selectedRange === "today") {
+    todayData.forEach((d) => {
+      if (d.checkinTime !== "-") checkinsCount++;
         if (d.checkoutTime !== "-") checkoutsCount++;
         if (d.status?.includes("สาย")) late++;
         if (d.status?.includes("หยุด") || d.status?.includes("ลา")) absent++;
@@ -367,7 +367,7 @@ const Dashboard = () => {
       absent,
       outside,
     };
-  }, [todayData, groupedRangeData, selectedRange, employees.length]);
+}, [todayData, groupedRangeData, selectedRange, employees.length]);
 
   const handleCardClick = (type) => {
       setFilterType(prev => prev === type ? null : type);
