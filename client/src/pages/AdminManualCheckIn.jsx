@@ -15,7 +15,8 @@ import {
   Space,
   Row,
   Col,
-  Alert
+  Alert,
+  Radio // ✅ เพิ่ม Radio สำหรับเลือกกะ
 } from "antd";
 import {
   CalendarOutlined,
@@ -23,7 +24,8 @@ import {
   SaveOutlined,
   ReloadOutlined,
   CalculatorOutlined,
-  SearchOutlined // ✅ 1. เพิ่ม Icon ค้นหา
+  SearchOutlined,
+  FieldTimeOutlined // ✅ เพิ่ม Icon กะ
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
@@ -35,6 +37,7 @@ dayjs.extend(isBetween);
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+// Helper แปลงเวลา
 const timeToMinutes = (timeStr) => {
   if (!timeStr) return 0;
   const [h, m] = timeStr.split(":").map(Number);
@@ -48,16 +51,15 @@ export default function AdminDailyManage() {
   const [tableData, setTableData] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [settings, setSettings] = useState(null);
+  const [settings, setSettings] = useState(null); // Global Settings (ค่าปรับ)
 
-  // ✅ 2. เพิ่ม State สำหรับคำค้นหา
   const [searchText, setSearchText] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(null);
   const [form] = Form.useForm();
 
-  // 1. โหลดข้อมูล Master
+  // 1. โหลดข้อมูล Master (พนักงาน, สาขา, ตั้งค่ากลาง)
   useEffect(() => {
     const fetchMasterData = async () => {
       try {
@@ -74,6 +76,11 @@ export default function AdminDailyManage() {
           const s = settingSnap.data();
           setSettings({
             ...s,
+            // ค่าปรับ Global
+            lateFine20: s.lateFine20 || 20,
+            lateFine50: s.lateFine50 || 50,
+            absentFine: s.absentFine || 50,
+            // Fallback เวลา (เผื่อสาขาไม่มีตั้งค่า)
             lateAfterMinutes: timeToMinutes(s.lateAfter || "08:15"),
             lateThreshold1Minutes: timeToMinutes(s.lateThreshold1 || "08:30"),
             lateThreshold2Minutes: timeToMinutes(s.lateThreshold2 || "09:00"),
@@ -86,7 +93,7 @@ export default function AdminDailyManage() {
     fetchMasterData();
   }, []);
 
-  // 2. โหลดข้อมูลเมื่อเปลี่ยนวันที่
+  // 2. โหลดข้อมูลรายวัน
   useEffect(() => {
     if (employees.length > 0) {
       fetchDailyData(selectedDate);
@@ -109,7 +116,9 @@ export default function AdminDailyManage() {
 
       const attendanceMap = {};
       checkinSnap.forEach(doc => {
-        attendanceMap[doc.data().employeeId] = { ...doc.data(), docId: doc.id, type: 'checkin' };
+        const data = doc.data();
+        // ✅ เก็บข้อมูล shift ด้วย (default เป็น 1)
+        attendanceMap[data.employeeId] = { ...data, docId: doc.id, type: 'checkin', shift: data.shift || 1 };
       });
 
       const leaveMap = {};
@@ -138,9 +147,10 @@ export default function AdminDailyManage() {
         let displayStatus = "ยังไม่ลงเวลา";
         let displayCheckinTime = "-";
         let displayCheckoutTime = "-";
-        let displayBranch = emp.branch || "-";
+        let displayBranch = emp.branch || (emp.branches ? emp.branches[0] : "-");
         let displayFine = 0;
         let displayNote = "";
+        let displayShift = 1; // Default Shift
 
         if (checkinRecord) {
             finalRecord = checkinRecord;
@@ -150,6 +160,7 @@ export default function AdminDailyManage() {
             displayBranch = checkinRecord.branch;
             displayFine = checkinRecord.fine;
             displayNote = checkinRecord.manualNote || checkinRecord.note;
+            displayShift = checkinRecord.shift; // ใช้ค่าจริงจาก DB
         } else if (leaveRecord) {
             finalRecord = leaveRecord;
             displayStatus = leaveRecord.status;
@@ -172,7 +183,8 @@ export default function AdminDailyManage() {
           status: displayStatus,
           branch: displayBranch,
           fine: displayFine,
-          note: displayNote
+          note: displayNote,
+          shift: displayShift // ✅ ส่งค่า shift ไปแสดงผล
         };
       });
 
@@ -185,29 +197,57 @@ export default function AdminDailyManage() {
     }
   };
 
-  const calculateAutoStatus = (timeObj) => {
+  // ✅ 3. Logic คำนวณสถานะ (รองรับ 2 กะ และเวลาตามสาขา)
+  const calculateAutoStatus = (timeObj, branchName, shift) => {
     if (!settings || !timeObj) return { status: "ปกติ", fine: 0 };
+    
+    // 1. หา Config ของสาขาที่เลือก
+    const branchConfig = branches.find(b => b.name === branchName);
+    
+    let lateAfter, t1, t2;
+
+    if (branchConfig) {
+        // ใช้เวลาจากสาขาตามกะที่เลือก
+        if (shift === 2 && branchConfig.hasShift2) {
+            lateAfter = timeToMinutes(branchConfig.shift2_lateAfter || "13:05");
+            t1 = timeToMinutes(branchConfig.shift2_lateThreshold1 || "13:15");
+            t2 = timeToMinutes(branchConfig.shift2_lateThreshold2 || "13:30");
+        } else {
+            // Shift 1
+            lateAfter = timeToMinutes(branchConfig.shift1_lateAfter || branchConfig.lateAfter || "08:05");
+            t1 = timeToMinutes(branchConfig.shift1_lateThreshold1 || branchConfig.lateThreshold1 || "08:15");
+            t2 = timeToMinutes(branchConfig.shift1_lateThreshold2 || branchConfig.lateThreshold2 || "08:30");
+        }
+    } else {
+        // Fallback ใช้ Global Settings ถ้าไม่เจอสาขา
+        lateAfter = settings.lateAfterMinutes;
+        t1 = settings.lateThreshold1Minutes;
+        t2 = settings.lateThreshold2Minutes;
+    }
+
     const timeStr = timeObj.format("HH:mm");
     const minutes = timeToMinutes(timeStr);
-    const { lateAfterMinutes, lateThreshold1Minutes, lateThreshold2Minutes, lateFine20, lateFine50, absentFine } = settings;
+    const { lateFine20, lateFine50, absentFine } = settings;
 
     let status = "ปกติ";
     let fine = 0;
 
-    if (minutes <= lateAfterMinutes) { status = "ปกติ"; fine = 0; }
-    else if (minutes <= lateThreshold1Minutes) { status = "มาสาย (ระดับ 1)"; fine = lateFine20 || 0; }
-    else if (minutes <= lateThreshold2Minutes) { status = "มาสาย (ระดับ 2)"; fine = lateFine50 || 0; }
+    if (minutes <= lateAfter) { status = "ปกติ"; fine = 0; }
+    else if (minutes <= t1) { status = "มาสาย (ระดับ 1)"; fine = lateFine20 || 0; }
+    else if (minutes <= t2) { status = "มาสาย (ระดับ 2)"; fine = lateFine50 || 0; }
     else { status = "ขาดงาน/สายมาก"; fine = absentFine || 0; }
 
     return { status, fine };
   };
 
-  const handleTimeChange = (time) => {
-    if (time) {
-      const { status, fine } = calculateAutoStatus(time);
-      form.setFieldsValue({ status, fine });
-      message.success(`คำนวณอัตโนมัติ: ${status}`);
-    }
+  // Trigger คำนวณเมื่อเปลี่ยน เวลา, สาขา หรือ กะ
+  const triggerAutoCalc = () => {
+      const values = form.getFieldsValue();
+      if (values.checkinTime) {
+          const { status, fine } = calculateAutoStatus(values.checkinTime, values.branch, values.shift);
+          form.setFieldsValue({ status, fine });
+          message.success(`คำนวณอัตโนมัติ (กะ ${values.shift}): ${status}`);
+      }
   };
 
   const handleEditClick = (record) => {
@@ -220,7 +260,8 @@ export default function AdminDailyManage() {
       branch: record.branch !== "-" ? record.branch : record.defaultBranch,
       status: record.status === "ยังไม่ลงเวลา" ? "ปกติ" : record.status, 
       fine: record.fine || 0,
-      note: record.note
+      note: record.note,
+      shift: record.shift || 1 // ✅ Load shift
     });
   };
 
@@ -235,6 +276,7 @@ export default function AdminDailyManage() {
         checkinTime: checkinTimeStr,
         checkoutTime: checkoutTimeStr,
         branch: values.branch,
+        shift: values.shift || 1, // ✅ บันทึก Shift
         status: values.status,
         fine: Number(values.fine) || 0,
         manualNote: values.note || "",
@@ -272,13 +314,13 @@ export default function AdminDailyManage() {
     }
   };
 
-  // ✅ 3. Logic Filter ข้อมูลตามคำค้นหา
+  // Filter
   const filteredData = tableData.filter((item) => {
     const query = searchText.toLowerCase();
     return (
-        item.name?.toLowerCase().includes(query) || // ค้นหาชื่อ
-        item.employeeId?.toLowerCase().includes(query) || // ค้นหารหัสพนักงาน
-        item.department?.toLowerCase().includes(query) // (เสริม) ค้นหาแผนก
+        item.name?.toLowerCase().includes(query) || 
+        item.employeeId?.toLowerCase().includes(query) || 
+        item.department?.toLowerCase().includes(query)
     );
   });
 
@@ -287,6 +329,7 @@ export default function AdminDailyManage() {
       title: "พนักงาน",
       dataIndex: "name",
       key: "name",
+      width: 180,
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{text}</div>
@@ -295,27 +338,38 @@ export default function AdminDailyManage() {
       )
     },
     {
+        title: "กะ", // ✅ เพิ่มคอลัมน์ กะ
+        dataIndex: "shift",
+        key: "shift",
+        width: 80,
+        align: 'center',
+        render: (s) => <Tag color="geekblue">กะ {s || 1}</Tag>
+    },
+    {
       title: "เวลาเข้า",
       dataIndex: "checkinTime",
       key: "checkinTime",
+      align: 'center',
       render: (text) => text === "-" ? <Text type="secondary">-</Text> : <Tag color="blue">{text}</Tag>
     },
     {
       title: "เวลาออก",
       dataIndex: "checkoutTime",
       key: "checkoutTime",
+      align: 'center',
       render: (text) => text === "-" ? <Text type="secondary">-</Text> : <Tag color="purple">{text}</Tag>
     },
     {
       title: "สถานะ",
       dataIndex: "status",
       key: "status",
+      align: 'center',
       render: (status) => {
         let color = "default";
         if (status === "ยังไม่ลงเวลา") color = "default";
         else if (status.includes("ปกติ")) color = "success";
         else if (status.includes("สาย")) color = "warning";
-        else if (status.includes("ขาด")) color = "error";
+        else if (status.includes("ขาด") || status.includes("พื้นที่")) color = "error";
         else if (status.includes("ลา") || status.includes("พักร้อน")) color = "processing";
         
         return <Tag color={color}>{status}</Tag>;
@@ -325,11 +379,13 @@ export default function AdminDailyManage() {
       title: "ค่าปรับ",
       dataIndex: "fine",
       key: "fine",
+      align: 'right',
       render: (val) => val > 0 ? <Text type="danger">{val}</Text> : "-"
     },
     {
       title: "จัดการ",
       key: "action",
+      align: 'center',
       render: (_, record) => (
         <Button 
           type="primary" 
@@ -356,7 +412,6 @@ export default function AdminDailyManage() {
           </Col>
           <Col>
             <Space>
-              {/* ✅ 4. เพิ่มช่อง Input Search */}
               <Input 
                  placeholder="ค้นหาชื่อ / รหัส" 
                  prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
@@ -380,7 +435,6 @@ export default function AdminDailyManage() {
           </Col>
         </Row>
 
-        {/* ✅ 5. เปลี่ยน dataSource เป็น filteredData */}
         <Table 
           columns={columns} 
           dataSource={filteredData} 
@@ -391,7 +445,7 @@ export default function AdminDailyManage() {
         />
       </Card>
 
-      {/* Modal แก้ไข (คงเดิม) */}
+      {/* Modal แก้ไข */}
       <Modal
         title={
           <span>
@@ -408,17 +462,37 @@ export default function AdminDailyManage() {
       >
         <Alert
           message="Auto Calculation"
-          description="เปลี่ยนเวลาเข้างาน = คำนวณสถานะ/ค่าปรับใหม่อัตโนมัติ"
+          description="เปลี่ยนเวลาเข้า/กะ/สาขา = คำนวณสถานะใหม่อัตโนมัติ (อิงตามเวลาสาขา)"
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />
 
         <Form form={form} layout="vertical" onFinish={handleSave}>
+          
+          <Row gutter={16}>
+             {/* ✅ เพิ่มตัวเลือกกะ */}
+             <Col span={12}>
+                <Form.Item name="shift" label="กะการทำงาน">
+                    <Radio.Group onChange={triggerAutoCalc} buttonStyle="solid">
+                        <Radio.Button value={1}>กะ 1</Radio.Button>
+                        <Radio.Button value={2}>กะ 2</Radio.Button>
+                    </Radio.Group>
+                </Form.Item>
+             </Col>
+             <Col span={12}>
+                <Form.Item name="branch" label="สาขา">
+                    <Select onChange={triggerAutoCalc}>
+                        {branches.map(b => <Option key={b.id} value={b.name}>{b.name}</Option>)}
+                    </Select>
+                </Form.Item>
+             </Col>
+          </Row>
+
           <Row gutter={16}>
              <Col span={12}>
                 <Form.Item name="checkinTime" label="เวลาเข้างาน">
-                    <TimePicker format="HH:mm" style={{ width: '100%' }} onChange={handleTimeChange} />
+                    <TimePicker format="HH:mm" style={{ width: '100%' }} onChange={triggerAutoCalc} />
                 </Form.Item>
              </Col>
              <Col span={12}>
@@ -448,12 +522,6 @@ export default function AdminDailyManage() {
                 </Form.Item>
              </Col>
           </Row>
-
-          <Form.Item name="branch" label="สาขา">
-             <Select>
-                {branches.map(b => <Option key={b.id} value={b.name}>{b.name}</Option>)}
-             </Select>
-          </Form.Item>
 
           <Form.Item name="note" label="หมายเหตุ">
              <Input.TextArea rows={2} />
