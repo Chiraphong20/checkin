@@ -687,7 +687,11 @@ export default function EmployeeCheckIn() {
          <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0' }}><pre>{firstTimeCheckInMessage}</pre></div>
          <Button type="primary" block size="large" onClick={()=>setShowFirstTimeModal(false)}>เริ่มใช้งาน</Button>
       </Modal>
+    <Button type="text" icon={<CloseCircleFilled />} onClick={() => window.liff?.closeWindow?.()} style={{ color: "#999" }}>
 
+                ปิดหน้าต่าง
+
+            </Button>
     </div>
   );
 }
