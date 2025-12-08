@@ -186,8 +186,10 @@ export default function AdminProfile() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-        <Spin size="large" tip="กำลังโหลดข้อมูล..." />
+      // ✅ แก้ไข Spin Warning: แยก Spin กับ Text และจัด Layout ด้วย Flex
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+        <Spin size="large" />
+        <div style={{ marginTop: 20, color: '#888', fontSize: '16px' }}>กำลังโหลดข้อมูล...</div>
       </div>
     );
   }
@@ -267,11 +269,10 @@ export default function AdminProfile() {
             </div>
           </Col>
 
-          {/* Details */}
-      {/* Details Column */}
+          {/* Details Column */}
           <Col xs={24} md={16}>
             
-            {/* ✅ ส่วนที่ 1: ข้อมูลส่วนตัว + ปุ่มแก้ไข (ย้ายมาตรงนี้) */}
+            {/* ✅ ส่วนที่ 1: ข้อมูลส่วนตัว + ปุ่มแก้ไข */}
             <div style={{ marginBottom: "30px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
                 <Title level={4} style={{ margin: 0, color: "#333" }}>ข้อมูลส่วนตัว</Title>
@@ -301,7 +302,7 @@ export default function AdminProfile() {
 
             <Divider />
 
-            {/* ✅ ส่วนที่ 2: ข้อมูลทั่วไป (เอาปุ่มออกแล้ว) */}
+            {/* ✅ ส่วนที่ 2: ข้อมูลทั่วไป */}
             <div style={{ marginBottom: "20px" }}>
               <Title level={4} style={{ margin: 0, color: "#333" }}>ข้อมูลทั่วไป</Title>
             </div>
@@ -317,7 +318,7 @@ export default function AdminProfile() {
 
             <Divider />
 
-            {/* ส่วนที่ 3: รหัสผ่าน (เหมือนเดิม) */}
+            {/* ส่วนที่ 3: รหัสผ่าน */}
             <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
                     <Title level={4} style={{ marginBottom: "10px", color: "#333" }}>รหัสผ่าน</Title>
@@ -339,15 +340,21 @@ export default function AdminProfile() {
         </Row>
       </div>
 
-      {/* Modal แก้ไขข้อมูลทั่วไป (เอาส่วนอัปโหลดรูปออกแล้ว) */}
+      {/* Modal แก้ไขข้อมูลทั่วไป */}
       <Modal
         title="แก้ไขข้อมูลส่วนตัว"
         open={isEditModalOpen}
         onCancel={() => setIsEditModalOpen(false)}
         footer={null}
-        destroyOnClose
+        // ✅ แก้ไข Modal Warning: ลบ destroyOnClose ออกจาก Modal
+        // และจะไปใช้ preserve={false} ใน Form แทน
       >
-        <Form form={editForm} layout="vertical" onFinish={handleSave}>
+        <Form 
+            form={editForm} 
+            layout="vertical" 
+            onFinish={handleSave} 
+            preserve={false} // ✅ เพิ่มบรรทัดนี้: ล้างค่าเมื่อปิด Modal (แทน destroyOnClose)
+        >
           <Form.Item label="ชื่อ-นามสกุล" name="name" rules={[{ required: true, message: "กรุณากรอกชื่อ" }]}>
             <Input size="large" prefix={<UserOutlined />} />
           </Form.Item>
@@ -379,9 +386,14 @@ export default function AdminProfile() {
         open={isPasswordModalOpen}
         onCancel={() => setIsPasswordModalOpen(false)}
         footer={null}
-        destroyOnClose
+        // ✅ ลบ destroyOnClose ออก
       >
-        <Form form={passwordForm} layout="vertical" onFinish={handlePasswordSave}>
+        <Form 
+            form={passwordForm} 
+            layout="vertical" 
+            onFinish={handlePasswordSave}
+            preserve={false} // ✅ เพิ่มบรรทัดนี้: ล้างค่าเมื่อปิด Modal
+        >
             <Form.Item 
                 label="รหัสผ่านใหม่" 
                 name="newPassword" 
