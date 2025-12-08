@@ -385,16 +385,6 @@ export default function EmployeeCheckIn() {
              } catch(e) { outsideArea = true; debugMsg = "GPS Error"; }
           }
 
-          // ✅ ตรวจสอบตัวแปรจาก state โดยตรงภายใน callback
-          // (แต่เพื่อให้มั่นใจ เราจะดึง logic ออกไปไว้ข้างนอก หรือเช็คตรงนี้เลยก็ได้)
-          // เนื่องจาก State ใน Callback อาจเก่า เราจึงใช้ setState callback หรือ ref ถ้าจำเป็น
-          // แต่ในที่นี้ logic ถูกเรียกใช้งานทีหลังผ่าน handle... function ซึ่งจะดึง state ปัจจุบันได้
-          
-          // Re-evaluate checkin status based on latest data (or pass parameters)
-          // Note: State `todayCheckin` inside this callback closure might be stale.
-          // However, for simplicity here, we assume it's up to date because `startQRScan` is recreated on dependency change.
-          // A safer way is to check DB again or use Refs. Let's rely on `useEffect` deps for now.
-
           const isCheckedIn = !!(todayCheckin && todayCheckin.checkinTime && todayCheckin.checkinTime !== "-");
           const isCheckedOut = !!(todayCheckin && todayCheckin.checkoutTime && todayCheckin.checkoutTime !== "-");
 
@@ -444,9 +434,6 @@ export default function EmployeeCheckIn() {
         }
     }
 
-    // เงื่อนไขเปิดกล้องอัตโนมัติ:
-    // 1. ยังไม่เช็คอิน
-    // 2. เช็คอินแล้ว + ยังไม่เช็คเอาท์ + ถึงเวลาออกงาน
     const shouldStartScan = 
         globalSettings && 
         lineProfile && 
@@ -687,11 +674,14 @@ export default function EmployeeCheckIn() {
          <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0' }}><pre>{firstTimeCheckInMessage}</pre></div>
          <Button type="primary" block size="large" onClick={()=>setShowFirstTimeModal(false)}>เริ่มใช้งาน</Button>
       </Modal>
-    <Button type="text" icon={<CloseCircleFilled />} onClick={() => window.liff?.closeWindow?.()} style={{ color: "#999" }}>
 
-                ปิดหน้าต่าง
+      {/* ✅ Added Close Button at the bottom */}
+      <div style={{ textAlign: 'center', paddingBottom: 40, marginTop: 20 }}>
+          <Button type="text" icon={<CloseCircleFilled />} onClick={() => window.liff?.closeWindow?.()} style={{ color: "#999" }}>
+              ปิดหน้าต่าง
+          </Button>
+      </div>
 
-            </Button>
     </div>
   );
 }
