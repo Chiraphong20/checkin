@@ -22,20 +22,19 @@ import {
   EditOutlined,
   SaveOutlined,
   ReloadOutlined,
-  CalculatorOutlined
+  CalculatorOutlined,
+  SearchOutlined // ✅ 1. เพิ่ม Icon ค้นหา
 } from "@ant-design/icons";
 import dayjs from "dayjs";
-import isBetween from "dayjs/plugin/isBetween"; // ✅ เพิ่ม Plugin นี้
+import isBetween from "dayjs/plugin/isBetween";
 import { db } from "../firebase";
 import { collection, getDocs, query, where, doc, updateDoc, addDoc, getDoc } from "firebase/firestore";
 
-// ✅ เปิดใช้งาน Plugin เปรียบเทียบช่วงวัน
 dayjs.extend(isBetween);
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-// Helper: แปลงเวลา HH:mm เป็นนาทีเพื่อคำนวณ
 const timeToMinutes = (timeStr) => {
   if (!timeStr) return 0;
   const [h, m] = timeStr.split(":").map(Number);
@@ -44,15 +43,18 @@ const timeToMinutes = (timeStr) => {
 
 export default function AdminDailyManage() {
   const [loading, setLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(dayjs()); 
+  const [selectedDate, setSelectedDate] = useState(dayjs());
   
-  const [tableData, setTableData] = useState([]); 
+  const [tableData, setTableData] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
-  const [settings, setSettings] = useState(null); 
+  const [settings, setSettings] = useState(null);
+
+  // ✅ 2. เพิ่ม State สำหรับคำค้นหา
+  const [searchText, setSearchText] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentRecord, setCurrentRecord] = useState(null); 
+  const [currentRecord, setCurrentRecord] = useState(null);
   const [form] = Form.useForm();
 
   // 1. โหลดข้อมูล Master
@@ -84,7 +86,7 @@ export default function AdminDailyManage() {
     fetchMasterData();
   }, []);
 
-  // 2. โหลดข้อมูลเมื่อเปลี่ยนวันที่ (แก้ใหม่ให้ดึง Leave ด้วย)
+  // 2. โหลดข้อมูลเมื่อเปลี่ยนวันที่
   useEffect(() => {
     if (employees.length > 0) {
       fetchDailyData(selectedDate);
@@ -97,12 +99,7 @@ export default function AdminDailyManage() {
     try {
       const dateStr = dateObj.format("YYYY-MM-DD");
       
-      // 🔥 2.1 ดึงข้อมูล Check-in (คนมาทำงาน/ขาดงาน)
       const qCheckin = query(collection(db, "employee_checkin"), where("date", "==", dateStr));
-      
-      // 🔥 2.2 ดึงข้อมูล Leave (วันลา)
-      // หมายเหตุ: การ Query แบบ Range ใน Firestore ซับซ้อน จึงดึงมาทั้งหมดแล้ว Filter ใน JS จะง่ายกว่าสำหรับเคสนี้
-      // หรือถ้าข้อมูลเยอะมาก ควร Query เฉพาะช่วงเดือน
       const qLeave = query(collection(db, "employee_leave")); 
 
       const [checkinSnap, leaveSnap] = await Promise.all([
@@ -110,27 +107,22 @@ export default function AdminDailyManage() {
         getDocs(qLeave)
       ]);
 
-      // Map Check-in
       const attendanceMap = {};
       checkinSnap.forEach(doc => {
         attendanceMap[doc.data().employeeId] = { ...doc.data(), docId: doc.id, type: 'checkin' };
       });
 
-      // Map Leave (เฉพาะวันที่ตรงกับ selectedDate)
       const leaveMap = {};
       leaveSnap.forEach(doc => {
         const data = doc.data();
-        // เช็คว่าวันที่เลือก อยู่ในช่วงวันลาหรือไม่ (รองรับทั้ง date เดี่ยว และ start-end)
         const startDate = dayjs(data.start || data.date);
         const endDate = dayjs(data.end || data.date);
         
-        // ตรวจสอบว่า selectedDate อยู่ระหว่าง start และ end หรือไม่
         if (dateObj.isBetween(startDate, endDate, 'day', '[]')) {
             leaveMap[data.employeeId] = { 
                 ...data, 
                 docId: doc.id, 
                 type: 'leave',
-                // แปลงสถานะให้แสดงผลสวยๆ
                 status: data.status === 'Approved' ? `ลา${data.type || ''} (อนุมัติ)` 
                       : data.status === 'Pending' ? `ลา${data.type || ''} (รออนุมัติ)` 
                       : `ลา${data.type || ''}`
@@ -138,12 +130,10 @@ export default function AdminDailyManage() {
         }
       });
 
-      // 🔥 2.3 Merge ข้อมูล (Check-in สำคัญกว่า Leave ถ้ามีทั้งคู่)
       const mergedList = employees.map(emp => {
         const checkinRecord = attendanceMap[emp.employeeId];
         const leaveRecord = leaveMap[emp.employeeId];
 
-        // Priority: Checkin > Leave > Empty
         let finalRecord = null;
         let displayStatus = "ยังไม่ลงเวลา";
         let displayCheckinTime = "-";
@@ -153,7 +143,6 @@ export default function AdminDailyManage() {
         let displayNote = "";
 
         if (checkinRecord) {
-            // กรณีมีข้อมูลใน employee_checkin (มาทำงาน, สาย, หรือแอดมินกดขาดงานให้)
             finalRecord = checkinRecord;
             displayStatus = checkinRecord.status;
             displayCheckinTime = checkinRecord.checkinTime;
@@ -162,11 +151,9 @@ export default function AdminDailyManage() {
             displayFine = checkinRecord.fine;
             displayNote = checkinRecord.manualNote || checkinRecord.note;
         } else if (leaveRecord) {
-            // กรณีไม่มี checkin แต่มีใบลา
             finalRecord = leaveRecord;
-            displayStatus = leaveRecord.status; // เช่น "ลาป่วย (อนุมัติ)"
+            displayStatus = leaveRecord.status;
             displayNote = leaveRecord.reason || "บันทึกการลา";
-            // วันลาไม่มีเวลาเข้าออก
         }
 
         return {
@@ -176,9 +163,8 @@ export default function AdminDailyManage() {
           department: emp.department || "-",
           defaultBranch: emp.branch || (emp.branches ? emp.branches[0] : "-"),
           
-          // ข้อมูลสำหรับตาราง
-          hasRecord: !!checkinRecord, // ใช้ checkinRecord เป็นตัวหลักในการ Edit เวลา
-          isLeave: !!leaveRecord && !checkinRecord, // Flag บอกว่าเป็นวันลาเพียวๆ
+          hasRecord: !!checkinRecord,
+          isLeave: !!leaveRecord && !checkinRecord,
           
           docId: finalRecord ? finalRecord.docId : null,
           checkinTime: displayCheckinTime,
@@ -199,7 +185,6 @@ export default function AdminDailyManage() {
     }
   };
 
-  // 3. Logic คำนวณ Auto
   const calculateAutoStatus = (timeObj) => {
     if (!settings || !timeObj) return { status: "ปกติ", fine: 0 };
     const timeStr = timeObj.format("HH:mm");
@@ -225,24 +210,20 @@ export default function AdminDailyManage() {
     }
   };
 
-  // 4. เปิด Modal แก้ไข
   const handleEditClick = (record) => {
     setCurrentRecord(record);
     setIsModalOpen(true);
     
-    // Set Form Values
     form.setFieldsValue({
       checkinTime: record.checkinTime !== "-" ? dayjs(record.checkinTime, "HH:mm") : null,
       checkoutTime: record.checkoutTime !== "-" && record.checkoutTime !== null ? dayjs(record.checkoutTime, "HH:mm") : null,
       branch: record.branch !== "-" ? record.branch : record.defaultBranch,
-      // ถ้าเป็นวันลา ให้แสดงสถานะนั้นเลย ถ้าไม่ใช่ให้เป็นปกติ
       status: record.status === "ยังไม่ลงเวลา" ? "ปกติ" : record.status, 
       fine: record.fine || 0,
       note: record.note
     });
   };
 
-  // 5. บันทึกข้อมูล (Save Logic)
   const handleSave = async (values) => {
     try {
       setLoading(true);
@@ -264,10 +245,6 @@ export default function AdminDailyManage() {
           : dayjs().format("YYYY-MM-DD HH:mm:ss")
       };
 
-      // บันทึก Checkin (ทับข้อมูลวันลา หรือ ข้อมูลเดิม)
-      // หมายเหตุ: เราเลือกบันทึกลง employee_checkin เสมอ เพราะหน้านี้คือ Daily Manage 
-      // ถ้าเดิมเป็นวันลา (isLeave=true) แล้วเรากดบันทึก มันจะสร้าง record ใน checkin ขึ้นมาทับ (สถานะใน checkin จะมีความสำคัญกว่า)
-      
       if (currentRecord.hasRecord && currentRecord.docId) {
         await updateDoc(doc(db, "employee_checkin", currentRecord.docId), saveData);
         message.success("อัปเดตข้อมูลเรียบร้อย");
@@ -294,6 +271,16 @@ export default function AdminDailyManage() {
       setLoading(false);
     }
   };
+
+  // ✅ 3. Logic Filter ข้อมูลตามคำค้นหา
+  const filteredData = tableData.filter((item) => {
+    const query = searchText.toLowerCase();
+    return (
+        item.name?.toLowerCase().includes(query) || // ค้นหาชื่อ
+        item.employeeId?.toLowerCase().includes(query) || // ค้นหารหัสพนักงาน
+        item.department?.toLowerCase().includes(query) // (เสริม) ค้นหาแผนก
+    );
+  });
 
   const columns = [
     {
@@ -329,7 +316,7 @@ export default function AdminDailyManage() {
         else if (status.includes("ปกติ")) color = "success";
         else if (status.includes("สาย")) color = "warning";
         else if (status.includes("ขาด")) color = "error";
-        else if (status.includes("ลา") || status.includes("พักร้อน")) color = "processing"; // สีฟ้าสำหรับวันลา
+        else if (status.includes("ลา") || status.includes("พักร้อน")) color = "processing";
         
         return <Tag color={color}>{status}</Tag>;
       }
@@ -351,7 +338,6 @@ export default function AdminDailyManage() {
           icon={<EditOutlined />} 
           onClick={() => handleEditClick(record)}
         >
-          {/* ถ้ามี record Checkin หรือ เป็นวันลา ก็ให้ขึ้นว่า แก้ไข */}
           {(record.hasRecord || record.isLeave) ? "แก้ไข" : "ลงเวลา"}
         </Button>
       )
@@ -370,6 +356,16 @@ export default function AdminDailyManage() {
           </Col>
           <Col>
             <Space>
+              {/* ✅ 4. เพิ่มช่อง Input Search */}
+              <Input 
+                 placeholder="ค้นหาชื่อ / รหัส" 
+                 prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+                 value={searchText}
+                 onChange={(e) => setSearchText(e.target.value)}
+                 style={{ width: 200 }}
+                 allowClear
+              />
+
               <Button icon={<ReloadOutlined />} onClick={() => fetchDailyData(selectedDate)} />
               <span style={{ fontSize: 16 }}>วันที่: </span>
               <DatePicker 
@@ -384,9 +380,10 @@ export default function AdminDailyManage() {
           </Col>
         </Row>
 
+        {/* ✅ 5. เปลี่ยน dataSource เป็น filteredData */}
         <Table 
           columns={columns} 
-          dataSource={tableData} 
+          dataSource={filteredData} 
           loading={loading}
           pagination={{ pageSize: 10 }}
           bordered
@@ -394,7 +391,7 @@ export default function AdminDailyManage() {
         />
       </Card>
 
-      {/* Modal แก้ไข */}
+      {/* Modal แก้ไข (คงเดิม) */}
       <Modal
         title={
           <span>

@@ -38,11 +38,15 @@ export default function EmployeeCheckIn() {
   const [todayCheckin, setTodayCheckin] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Modals state
+  // --- Modals state ---
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastCheckInMessage, setLastCheckInMessage] = useState("");
-  const [showLateModal, setShowLateModal] = useState(false);
-  const [showVeryLateModal, setShowVeryLateModal] = useState(false);
+  
+  // ✅ แยก Modal ตามระดับความสาย
+  const [showLateLevel1Modal, setShowLateLevel1Modal] = useState(false); // ระดับ 1: มาให้ไวกว่านี้นะ
+  const [showLateLevel2Modal, setShowLateLevel2Modal] = useState(false); // ระดับ 2: วิ่งงงงง
+  const [showLateLevel3Modal, setShowLateLevel3Modal] = useState(false); // ระดับ 3: สายแล้วนะ กลับบ้านไปนอนเลย
+
   const [showOutsideModal, setShowOutsideModal] = useState(false);
   const [showFirstTimeModal, setShowFirstTimeModal] = useState(false);
   const [firstTimeCheckInMessage, setFirstTimeCheckInMessage] = useState("");
@@ -51,7 +55,7 @@ export default function EmployeeCheckIn() {
 
   const qrRef = useRef(null);
   const html5QrCodeRef = useRef(null);
-  const hasScannedRef = useRef(false); // ตัวแปรป้องกันการรันซ้ำ
+  const hasScannedRef = useRef(false);
   const [branchCoordsMap, setBranchCoordsMap] = useState({});
   const [settings, setSettings] = useState(null);
 
@@ -83,7 +87,6 @@ export default function EmployeeCheckIn() {
         { 
             enableHighAccuracy: true, 
             timeout: 20000, 
-            // maximumAge: ยอมรับค่าเก่าที่แคชไว้ไม่เกิน 1 นาที (ช่วยลดการถาม Permission บ่อยๆ)
             maximumAge: 60000 
         }
       );
@@ -93,12 +96,10 @@ export default function EmployeeCheckIn() {
     if (!employeeId) return;
     const today = dayjs().format("YYYY-MM-DD");
 
-    // เช็คการลา
     const leaveQuery = query(collection(db, "employee_leave"), where("employeeId", "==", employeeId), where("date", "==", today));
     const leaveSnap = await getDocs(leaveQuery);
     const hasLeaveToday = !leaveSnap.empty;
 
-    // เช็คการลงเวลา
     const checkinQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", employeeId), where("date", "==", today));
     const checkinSnap = await getDocs(checkinQuery);
 
@@ -144,7 +145,7 @@ export default function EmployeeCheckIn() {
         setSettings({ radius: 100, startTimeMinutes: 480, checkoutTimeMinutes: 960 }); 
       }
       
-      await initLiff("2008408737-4x2nLQp8"); // ใส่ LIFF ID
+      await initLiff("2008408737-4x2nLQp8"); // LIFF ID เดิมของคุณ
       const profile = await getProfile();
       const userId = getLineUserId();
       if (!profile || !userId) {
@@ -178,7 +179,6 @@ export default function EmployeeCheckIn() {
         const employeeId = snapshot.docs[0].id;
         setSelectedEmployee({ employeeId, ...emp });
         setFirstTime(false);
-        
         await checkTodayCheckin(employeeId); 
       } else {
         const empSnapshot = await getDocs(collection(db, "employees"));
@@ -190,7 +190,6 @@ export default function EmployeeCheckIn() {
     };
 
     startLiff();
-    // เมื่อ Component ถูกทำลาย ให้หยุดสแกนเสมอ
     return () => {
         if(html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
             html5QrCodeRef.current.stop().catch(err => console.error(err));
@@ -224,18 +223,15 @@ export default function EmployeeCheckIn() {
     if (!qrRef.current || !selectedEmployee || scanning || !settings || !html5QrCodeRef.current) return;
     
     setScanning(true);
-    hasScannedRef.current = false; // รีเซ็ตสถานะการสแกน
+    hasScannedRef.current = false;
 
     try {
       await html5QrCodeRef.current.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 250 },
         async (decodedText) => {
-          // --- ป้องกัน Race Condition (สแกนซ้ำ) ---
           if (hasScannedRef.current) return;
           hasScannedRef.current = true;
-          
-          // 🔥 สั่งหยุดกล้องทันทีที่อ่านเจอ!
           await stopScanner(); 
 
           let branchName = "";
@@ -245,7 +241,7 @@ export default function EmployeeCheckIn() {
             if (!branchName) throw new Error("No branch");
           } catch (err) {
             message.error("QR Code ไม่ถูกต้อง");
-            setScanning(false); // ถ้าผิดพลาด ให้สถานะกลับมาพร้อมสแกนใหม่ (ถ้าต้องการ)
+            setScanning(false);
             return;
           }
 
@@ -259,7 +255,6 @@ export default function EmployeeCheckIn() {
             
             if (coords) {
               const dist = haversineMeters(latitude, longitude, coords.lat, coords.lng);
-              // ระยะทางที่หักลบความคลาดเคลื่อนแล้ว
               const adjustedDistance = Math.max(0, dist - accuracy);
               
               if (adjustedDistance > settings.radius) {
@@ -296,12 +291,8 @@ export default function EmployeeCheckIn() {
               console.error(e);
               message.error("เกิดข้อผิดพลาดในการบันทึก"); 
           }
-          
-          // ไม่ต้อง stopScanner ตรงนี้แล้ว เพราะสั่งไปตั้งแต่ต้นแล้ว
         },
-        (errorMessage) => {
-            // ปล่อยผ่าน error เล็กน้อยขณะสแกน
-        }
+        (errorMessage) => {}
       );
     } catch (e) {
       console.error(e);
@@ -309,16 +300,14 @@ export default function EmployeeCheckIn() {
     }
   };
 
-  // useEffect สำหรับ Auto Start Scanner (ปรับปรุงใหม่)
+  // Auto Start Scanner logic
   useEffect(() => {
     const qrElement = document.getElementById("qr-reader");
+    
+    // ✅ เพิ่ม Modal ใหม่เข้าไปในเงื่อนไขหยุดสแกน
+    const isModalOpen = showSuccessModal || showLateLevel1Modal || showLateLevel2Modal || showLateLevel3Modal || showOutsideModal || showFirstTimeModal || showCheckoutModal;
 
-    // ตรวจสอบว่ามี Modal ใดๆ เปิดอยู่หรือไม่
-    const isModalOpen = showSuccessModal || showLateModal || showVeryLateModal || showOutsideModal || showFirstTimeModal || showCheckoutModal;
-
-    // เงื่อนไข: ต้องโหลดข้อมูลเสร็จ, มีพนักงานเลือกแล้ว, ยังไม่เช็คอินวันนี้, และไม่มี Modal เปิดอยู่
     if (settings && lineProfile && dataLoaded && qrElement && selectedEmployee && !todayCheckin && !isModalOpen) {
-      
       if (!html5QrCodeRef.current) {
         try {
           html5QrCodeRef.current = new Html5Qrcode("qr-reader");
@@ -330,12 +319,12 @@ export default function EmployeeCheckIn() {
       if (html5QrCodeRef.current && !scanning) {
          const timer = setTimeout(() => {
              startQRScan();
-         }, 800); // หน่วงเวลาเล็กน้อยเพื่อให้ UI พร้อม
+         }, 800);
          return () => clearTimeout(timer);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, lineProfile, dataLoaded, selectedEmployee, todayCheckin, showSuccessModal, showLateModal, showVeryLateModal, showOutsideModal, showCheckoutModal]); 
+  }, [settings, lineProfile, dataLoaded, selectedEmployee, todayCheckin, showSuccessModal, showLateLevel1Modal, showLateLevel2Modal, showLateLevel3Modal, showOutsideModal, showCheckoutModal]); 
 
 
   const handleSelect = (value) => {
@@ -412,14 +401,27 @@ export default function EmployeeCheckIn() {
         setTimeout(() => setShowFirstTimeModal(true), 60);
       } else {
         const totalMinutes = now.hour() * 60 + now.minute();
-        const { lateAfterMinutes, lateThreshold2Minutes } = settings;
+        const { lateAfterMinutes, lateThreshold1Minutes, lateThreshold2Minutes } = settings;
 
         if (options.outsideArea) {
              setTimeout(() => setShowOutsideModal(true), 60);
         }
-        else if (totalMinutes > lateAfterMinutes && totalMinutes <= lateThreshold2Minutes) setTimeout(() => setShowLateModal(true), 60);
-        else if (totalMinutes > lateThreshold2Minutes) setTimeout(() => setShowVeryLateModal(true), 60);
-        else setTimeout(() => setShowSuccessModal(true), 60);
+        // ✅ ระดับ 1: สายเล็กน้อย
+        else if (totalMinutes > lateAfterMinutes && totalMinutes <= lateThreshold1Minutes) {
+             setTimeout(() => setShowLateLevel1Modal(true), 60);
+        }
+        // ✅ ระดับ 2: สายปานกลาง
+        else if (totalMinutes > lateThreshold1Minutes && totalMinutes <= lateThreshold2Minutes) {
+             setTimeout(() => setShowLateLevel2Modal(true), 60);
+        }
+        // ✅ ระดับ 3: สายมาก
+        else if (totalMinutes > lateThreshold2Minutes) {
+             setTimeout(() => setShowLateLevel3Modal(true), 60);
+        }
+        // ✅ ทันเวลา
+        else {
+             setTimeout(() => setShowSuccessModal(true), 60);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -451,9 +453,7 @@ export default function EmployeeCheckIn() {
         if (html5QrCodeRef.current.isScanning) {
             await html5QrCodeRef.current.stop();
         }
-      } catch (e) {
-          // Ignore stop errors if mostly stopped
-      }
+      } catch (e) {}
       setScanning(false);
       hasScannedRef.current = false;
     }
@@ -568,7 +568,6 @@ export default function EmployeeCheckIn() {
         
         {/* 3. Action Button (Scanner) */}
         <div style={{ marginBottom: 30 }}>
-            {/* Hidden Scanner Div */}
             <div id="qr-reader" ref={qrRef} style={{ width: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: scanning ? 20 : 0, display: scanning ? 'block' : 'none' }} />
             
             <Button 
@@ -644,23 +643,18 @@ export default function EmployeeCheckIn() {
 
       </div>
 
-      {/* Modals - Check In Success (On Time) */}
+      {/* --- Modal เช็คอินทันเวลา --- */}
       <Modal open={showSuccessModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <CheckCircleFilled style={{ fontSize: 60, color: '#52c41a', marginBottom: 20 }} />
          <Title level={4} style={{ color: '#52c41a' }}>สุดยอด! มาทันเวลา</Title>
-         
-         <img 
-           src="/ontime.gif" 
-           alt="On time" 
-           style={{ width: 200, marginBottom: 20 }} 
-         />
-
+         <img src="/ontime.gif" alt="On time" style={{ width: 200, marginBottom: 20 }} />
          <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #b7eb8f' }}>
             <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
          <Button type="primary" block size="large" onClick={()=>setShowSuccessModal(false)} style={{ borderRadius: 10, background: '#52c41a' }}>ตกลง</Button>
       </Modal>
 
+      {/* --- Modal เช็คเอาท์ --- */}
       <Modal open={showCheckoutModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <LogoutOutlined style={{ fontSize: 60, color: '#1890ff', marginBottom: 20 }} />
          <Title level={4}>เช็คเอาท์สำเร็จ</Title>
@@ -670,7 +664,7 @@ export default function EmployeeCheckIn() {
          <Button type="primary" block size="large" onClick={()=>setShowCheckoutModal(false)} style={{ borderRadius: 10 }}>ตกลง</Button>
       </Modal>
 
-      {/* Other Alert Modals */}
+      {/* --- Modal นอกพื้นที่ --- */}
       <Modal open={showOutsideModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <EnvironmentOutlined style={{ fontSize: 60, color: '#faad14', marginBottom: 20 }} />
          <Title level={4} style={{ color: '#faad14' }}>อยู่นอกพื้นที่!</Title>
@@ -680,31 +674,40 @@ export default function EmployeeCheckIn() {
          <Button type="primary" danger block size="large" onClick={()=>setShowOutsideModal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
       </Modal>
 
-      <Modal open={showLateModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 0 }}>
-         <ClockCircleOutlined style={{ fontSize: 60, color: '#ff4d4f', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#ff4d4f' }}>สายแล้วนะ! กลับบ้านไปนอนเลยนะ</Title>
-         
-         <img 
-           src="/sleep.jpg" 
-           alt="Go to sleep" 
-           style={{ width: 300, marginBottom: 20 }} 
-         />
-
-         <div style={{ background: '#fff1f0', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffccc7' }}>
+      {/* --- Modal ระดับ 1: มาสายเล็กน้อย --- */}
+      <Modal open={showLateLevel1Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
+         <ClockCircleOutlined style={{ fontSize: 60, color: '#faad14', marginBottom: 20 }} />
+         <Title level={4} style={{ color: '#faad14' }}>มาให้ไวกว่านี้นะ</Title>
+         <div style={{ background: '#fffbe6', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffe58f' }}>
              <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" danger block size="large" onClick={()=>setShowLateModal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+         <Button type="primary" style={{ background: '#faad14', borderColor: '#faad14', borderRadius: 10 }} block size="large" onClick={()=>setShowLateLevel1Modal(false)}>รับทราบ</Button>
       </Modal>
 
-      <Modal open={showVeryLateModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
-         <CloseCircleFilled style={{ fontSize: 60, color: '#cf1322', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#cf1322' }}>สายมาก/ขาดงาน</Title>
-         <div style={{ background: '#fff1f0', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffa39e' }}>
+      {/* --- Modal ระดับ 2: สายปานกลาง --- */}
+      <Modal open={showLateLevel2Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
+         <div style={{ fontSize: 60, marginBottom: 20 }}>🏃💨</div>
+         <Title level={3} style={{ color: '#fa541c' }}>วิ่งงงงงงงง</Title>
+         <div style={{ background: '#fff2e8', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffbb96' }}>
              <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" danger block size="large" onClick={()=>setShowVeryLateModal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+         <Button type="primary" danger block size="large" onClick={()=>setShowLateLevel2Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
       </Modal>
 
+      {/* --- Modal ระดับ 3: สายมาก/ขาดงาน --- */}
+      <Modal open={showLateLevel3Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 0 }}>
+         <CloseCircleFilled style={{ fontSize: 60, color: '#cf1322', marginBottom: 20, marginTop: 30 }} />
+         <Title level={4} style={{ color: '#cf1322', padding: '0 20px' }}>สายแล้วนะ! กลับบ้านไปนอนเลยนะ</Title>
+         <img src="/sleep.jpg" alt="Go to sleep" style={{ width: '100%', maxWidth: 300, marginBottom: 20, marginTop: 10, borderRadius: 8 }} />
+         <div style={{ background: '#fff1f0', padding: 15, borderRadius: 10, margin: '0 20px 20px 20px', border: '1px solid #ffa39e' }}>
+             <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
+         </div>
+         <div style={{ padding: '0 20px 30px 20px' }}>
+            <Button type="primary" danger block size="large" onClick={()=>setShowLateLevel3Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+         </div>
+      </Modal>
+
+      {/* --- Modal ยินดีต้อนรับ (ครั้งแรก) --- */}
       <Modal open={showFirstTimeModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <CheckCircleFilled style={{ fontSize: 60, color: '#52c41a', marginBottom: 20 }} />
          <Title level={4} style={{ marginTop: 10 }}>ยินดีต้อนรับ</Title>

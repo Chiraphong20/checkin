@@ -11,22 +11,20 @@ import {
   Button,
   Alert,
   Typography,
-  theme,
   Avatar,
-  notification
 } from "antd";
-import { 
-    UserOutlined, 
-    CheckCircleOutlined, 
-    CloseCircleOutlined, 
-    CarOutlined, 
-    ClockCircleOutlined,
-    InfoCircleOutlined,
-    CheckCircleFilled
+import {
+  UserOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  CarOutlined,
+  ClockCircleOutlined,
+  InfoCircleOutlined,
+  CheckCircleFilled,
+  ShopOutlined,
 } from "@ant-design/icons";
-import { db } from "../firebase"; 
-// ✅ เปลี่ยน import: เพิ่ม setDoc และ doc
-import { collection, getDocs, setDoc, doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import "dayjs/locale/th";
@@ -34,7 +32,7 @@ import "dayjs/locale/th";
 dayjs.locale("th");
 dayjs.extend(isBetween);
 
-const { Title, Text } = Typography; 
+const { Text } = Typography;
 
 const Dashboard = () => {
   // --- State ข้อมูล ---
@@ -48,13 +46,14 @@ const Dashboard = () => {
 
   // --- State สำหรับแสดงผล ---
   const [fineAmount, setFineAmount] = useState(50);
-  const [cutoffTimeStr, setCutoffTimeStr] = useState("16:00"); 
+  const [cutoffTimeStr, setCutoffTimeStr] = useState("16:00");
   const [isCutoffDone, setIsCutoffDone] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [todayString, setTodayString] = useState(dayjs().format("D MMMM YYYY เวลา HH:mm น."));
 
   // State Filter
-  const [filterType, setFilterType] = useState(null); 
-  
+  const [filterType, setFilterType] = useState(null);
+
   // Update Clock UI
   useEffect(() => {
     const timer = setInterval(() => {
@@ -67,44 +66,45 @@ const Dashboard = () => {
   // 🔹 โหลดข้อมูลทั้งหมด
   // ---------------------------------------------------------
   const fetchAllData = useCallback(async () => {
+    try {
+      // 1. ดึงค่า Config
       try {
-        // 1. ดึงค่า Config
-        try {
-            const settingsSnap = await getDoc(doc(db, "settings", "checkin"));
-            if (settingsSnap.exists()) {
-                const sData = settingsSnap.data();
-                setFineAmount(sData.absentFine || 50);
-                if (sData.checkoutTime) {
-                    setCutoffTimeStr(sData.checkoutTime);
-                }
-            }
-        } catch (e) { console.log("Using default settings"); }
-
-        // 2. ดึงข้อมูลหลัก
-        const branchSnap = await getDocs(collection(db, "branches"));
-        setBranches(branchSnap.docs.map((doc) => ({ id: doc.id, name: doc.data().name })));
-
-        const empSnap = await getDocs(collection(db, "employees"));
-        setEmployees(empSnap.docs.map((doc) => doc.data()));
-
-        const checkinSnap = await getDocs(collection(db, "employee_checkin"));
-        setCheckins(checkinSnap.docs.map((doc) => doc.data()));
-
-        const leaveSnap = await getDocs(collection(db, "employee_leave"));
-        setLeaves(leaveSnap.docs.map((doc) => doc.data()));
-
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+        const settingsSnap = await getDoc(doc(db, "settings", "checkin"));
+        if (settingsSnap.exists()) {
+          const sData = settingsSnap.data();
+          setFineAmount(sData.absentFine || 50);
+          if (sData.checkoutTime) {
+            setCutoffTimeStr(sData.checkoutTime);
+          }
+        }
+      } catch (e) {
+        console.log("Using default settings");
       }
+
+      // 2. ดึงข้อมูลหลัก
+      const branchSnap = await getDocs(collection(db, "branches"));
+      setBranches(branchSnap.docs.map((doc) => ({ id: doc.id, name: doc.data().name })));
+
+      const empSnap = await getDocs(collection(db, "employees"));
+      setEmployees(empSnap.docs.map((doc) => doc.data()));
+
+      const checkinSnap = await getDocs(collection(db, "employee_checkin"));
+      setCheckins(checkinSnap.docs.map((doc) => doc.data()));
+
+      const leaveSnap = await getDocs(collection(db, "employee_leave"));
+      setLeaves(leaveSnap.docs.map((doc) => doc.data()));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   // Initial Load & Auto Refresh
   useEffect(() => {
     setLoading(true);
     fetchAllData();
-    const interval = setInterval(fetchAllData, 60000); 
+    const interval = setInterval(fetchAllData, 60000);
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
@@ -112,72 +112,126 @@ const Dashboard = () => {
   // 🔹 คำนวณรายชื่อคนขาดงาน (Live Calculation)
   // ---------------------------------------------------------
   const absentEmployeesList = useMemo(() => {
-      const todayStr = dayjs().format("YYYY-MM-DD");
-      
-      const missing = employees.filter(emp => {
-          const hasCheckin = checkins.find(c => c.employeeId === emp.employeeId && c.date === todayStr);
-          
-          const hasLeave = leaves.find(l => {
-             const start = dayjs(l.start || l.date);
-             const end = dayjs(l.end || l.date);
-             return l.employeeId === emp.employeeId && dayjs(todayStr).isBetween(start, end, 'day', '[]');
-          });
+    const todayStr = dayjs().format("YYYY-MM-DD");
 
-          return !hasCheckin && !hasLeave;
-      }).map(emp => ({
-          ...emp,
-          status: 'ขาดงาน'
+    const missing = employees
+      .filter((emp) => {
+        const hasCheckin = checkins.find(
+          (c) => c.employeeId === emp.employeeId && c.date === todayStr
+        );
+
+        const hasLeave = leaves.find((l) => {
+          const start = dayjs(l.start || l.date);
+          const end = dayjs(l.end || l.date);
+          return (
+            l.employeeId === emp.employeeId &&
+            dayjs(todayStr).isBetween(start, end, "day", "[]")
+          );
+        });
+
+        return !hasCheckin && !hasLeave;
+      })
+      .map((emp) => ({
+        ...emp,
+        status: "ขาดงาน",
       }));
-      return missing;
+    return missing;
   }, [employees, checkins, leaves]);
 
   // ตรวจสอบว่าวันนี้ตัดยอดไปหรือยัง
   useEffect(() => {
-      const todayStr = dayjs().format("YYYY-MM-DD");
-      const hasAutoRecord = checkins.some(c => c.date === todayStr && c.isAutoAbsent === true);
-      
-      const now = dayjs();
-      const [ch, cm] = cutoffTimeStr.split(':');
-      const cutoffTime = dayjs().hour(ch).minute(cm);
+    const todayStr = dayjs().format("YYYY-MM-DD");
+    const hasAutoRecord = checkins.some(
+      (c) => c.date === todayStr && c.isAutoAbsent === true
+    );
 
-      if (hasAutoRecord || (now.isAfter(cutoffTime) && absentEmployeesList.length === 0)) {
-          setIsCutoffDone(true);
-      } else {
-          setIsCutoffDone(false);
-      }
+    const now = dayjs();
+    const [ch, cm] = cutoffTimeStr.split(":");
+    const cutoffTime = dayjs().hour(ch).minute(cm);
+
+    if (hasAutoRecord || (now.isAfter(cutoffTime) && absentEmployeesList.length === 0)) {
+      setIsCutoffDone(true);
+    } else {
+      setIsCutoffDone(false);
+    }
   }, [checkins, absentEmployeesList, cutoffTimeStr]);
 
   // ---------------------------------------------------------
-  // 🔹 Logic การ Filter ข้อมูลสำหรับ Table
+  // 🔹 คำนวณจำนวนพนักงานแยกตามสาขา (สำหรับ Card ด้านล่าง)
+  // ---------------------------------------------------------
+  const branchEmployeeStats = useMemo(() => {
+    const stats = {};
+    branches.forEach((b) => {
+      stats[b.name] = 0;
+    });
+
+    employees.forEach((emp) => {
+      const empBranches = Array.isArray(emp.branches)
+        ? emp.branches
+        : emp.branch
+        ? [emp.branch]
+        : [];
+      
+      empBranches.forEach((bName) => {
+        if (stats[bName] !== undefined) {
+          stats[bName]++;
+        } else {
+          stats[bName] = (stats[bName] || 0) + 1;
+        }
+      });
+    });
+
+    return Object.keys(stats).map((key) => ({
+      name: key,
+      count: stats[key],
+    }));
+  }, [employees, branches]);
+
+  // ---------------------------------------------------------
+  // 🔹 Logic การ Filter ข้อมูล
   // ---------------------------------------------------------
 
-  const branchOptions = useMemo(
-    () => [
-      { value: "ทั้งหมด", label: "ทั้งหมด" },
-      ...branches.map((b) => ({ value: b.name, label: b.name })),
-    ],
-    [branches]
-  );
-
+  // 1. Filter พนักงานตามสาขาที่เลือกก่อน
   const branchEmployees = useMemo(
     () =>
       selectedBranch === "ทั้งหมด"
         ? employees
         : employees.filter((e) => {
-            const branches = Array.isArray(e.branches) ? e.branches : e.branch ? [e.branch] : [];
+            const branches = Array.isArray(e.branches)
+              ? e.branches
+              : e.branch
+              ? [e.branch]
+              : [];
             return branches.includes(selectedBranch);
           }),
     [employees, selectedBranch]
   );
+
+  // 2. สร้าง Options Dropdown พร้อมตัวเลข
+  const branchOptions = useMemo(() => {
+     const countMap = branchEmployeeStats.reduce((acc, curr) => {
+        acc[curr.name] = curr.count;
+        return acc;
+     }, {});
+
+    return [
+      { value: "ทั้งหมด", label: `ทั้งหมด (${employees.length} คน)` },
+      ...branches.map((b) => ({
+        value: b.name,
+        label: `${b.name} (${countMap[b.name] || 0} คน)`,
+      })),
+    ];
+  }, [branches, branchEmployeeStats, employees.length]);
 
   const branchEmployeeIds = useMemo(
     () => new Set(branchEmployees.map((e) => e.employeeId)),
     [branchEmployees]
   );
 
+  // 3. รวมข้อมูล Checkin และ Leave
   const mergedCheckins = useMemo(() => {
     const leaveRecords = leaves.map((l) => {
-      const emp = employees.find(e => e.employeeId === l.employeeId);
+      const emp = employees.find((e) => e.employeeId === l.employeeId);
       const typeText = l.type || l.leaveType || "";
       const statusText = typeText ? `ลา (${typeText})` : "ลา";
 
@@ -197,6 +251,7 @@ const Dashboard = () => {
     return [...checkins, ...leaveRecords];
   }, [checkins, leaves, employees]);
 
+  // 4. Process ข้อมูลตามสาขา
   const processedCheckins = useMemo(() => {
     const today = dayjs();
 
@@ -228,7 +283,11 @@ const Dashboard = () => {
         let status = item.status;
 
         if (!item.__isLeave && emp) {
-          const empBranches = Array.isArray(emp.branches) ? emp.branches : emp.branch ? [emp.branch] : [];
+          const empBranches = Array.isArray(emp.branches)
+            ? emp.branches
+            : emp.branch
+            ? [emp.branch]
+            : [];
           if (item.branch && empBranches.length > 0 && !empBranches.includes(item.branch)) {
             status = "นอกพื้นที่";
           }
@@ -237,7 +296,7 @@ const Dashboard = () => {
       });
   }, [mergedCheckins, branchEmployeeIds, selectedBranch, selectedRange, employees]);
 
-  // ✅ ดึง Logic การคำนวณข้อมูลสำหรับมุมมอง "วันนี้" กลับมา
+  // 5. Logic มุมมอง Today
   const todayData = useMemo(() => {
     if (selectedRange !== "today") return [];
 
@@ -252,25 +311,44 @@ const Dashboard = () => {
       } else {
         const existingTime = existing.checkinTime || "00:00";
         const newTime = item.checkinTime || "00:00";
-        // เก็บรายการที่มีเวลาเข้าล่าสุด หรือเก็บรายการที่ไม่ใช่การลา ถ้ามีรายการที่ไม่ใช่การลาเข้ามาใหม่
         if (newTime >= existingTime || (existing.__isLeave && !item.__isLeave)) {
-             map.set(key, item);
+          map.set(key, item);
         }
       }
     });
 
-    return Array.from(map.values()).sort((a, b) => {
-       const timeA = a.checkinTime === "-" ? "" : a.checkinTime;
-       const timeB = b.checkinTime === "-" ? "" : b.checkinTime;
-       if (timeA && timeB) return timeB.localeCompare(timeA);
-       if (timeA && !timeB) return -1;
-       if (!timeA && timeB) return 1;
-       return a.name.localeCompare(b.name);
+    let finalData = Array.from(map.values());
+    const presentIds = new Set(finalData.map((d) => d.employeeId));
+
+    const absentForBranch = absentEmployeesList
+      .filter((emp) => branchEmployeeIds.has(emp.employeeId))
+      .filter((emp) => !presentIds.has(emp.employeeId))
+      .map((emp) => ({
+        employeeId: emp.employeeId,
+        name: emp.name,
+        branch: emp.branch || (Array.isArray(emp.branches) ? emp.branches[0] : "-"),
+        date: dayjs().format("YYYY-MM-DD"),
+        checkinTime: "-",
+        checkoutTime: "-",
+        status: "ขาดงาน",
+        fine: fineAmount,
+        pictureUrl: emp.pictureUrl,
+        isAutoAbsent: false,
+      }));
+
+    finalData = [...finalData, ...absentForBranch];
+
+    return finalData.sort((a, b) => {
+      const timeA = a.checkinTime === "-" ? "" : a.checkinTime;
+      const timeB = b.checkinTime === "-" ? "" : b.checkinTime;
+      if (timeA && timeB) return timeB.localeCompare(timeA);
+      if (timeA && !timeB) return -1;
+      if (!timeA && timeB) return 1;
+      return a.name.localeCompare(b.name);
     });
+  }, [processedCheckins, selectedRange, absentEmployeesList, branchEmployeeIds, fineAmount]);
 
-  }, [processedCheckins, selectedRange]);
-
-  // ✅ ดึง Logic การจัดกลุ่มข้อมูลสำหรับมุมมอง "7วัน/เดือน" กลับมา
+  // 6. Logic มุมมอง Range
   const groupedRangeData = useMemo(() => {
     if (selectedRange === "today") return [];
 
@@ -285,7 +363,15 @@ const Dashboard = () => {
           name: item.name || emp?.name || "-",
           branch: item.branch || (emp?.branches ? emp.branches[0] : emp?.branch) || "-",
           history: [],
-          summary: { late: 0, absent: 0, leave: 0, outside: 0, checkin: 0, checkout: 0, fine: 0 },
+          summary: {
+            late: 0,
+            absent: 0,
+            leave: 0,
+            outside: 0,
+            checkin: 0,
+            checkout: 0,
+            fine: 0,
+          },
         });
       }
 
@@ -295,13 +381,12 @@ const Dashboard = () => {
       if (item.status?.includes("สาย")) rec.summary.late += 1;
       if (item.status?.includes("หยุด") || item.status?.includes("ลา")) rec.summary.leave += 1;
       if (item.status === "นอกพื้นที่") rec.summary.outside += 1;
-      if (item.status === "ขาดงาน") { 
-          rec.summary.absent += 1; 
+      if (item.status === "ขาดงาน") {
+        rec.summary.absent += 1;
       }
       if (item.checkinTime !== "-") rec.summary.checkin += 1;
       if (item.checkoutTime !== "-") rec.summary.checkout += 1;
 
-      // คำนวณค่าปรับทั้งหมด
       rec.summary.fine += parseInt(item.fine) || 0;
     });
 
@@ -312,47 +397,52 @@ const Dashboard = () => {
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [processedCheckins, selectedRange, employees]);
 
-  // ✅ แก้ไข Filter Logic ให้รองรับทั้ง Today และ Range view
+  // 7. Filter ตาม Card Click
   const filteredDataSource = useMemo(() => {
     let data = selectedRange === "today" ? todayData : groupedRangeData;
-    if (!filterType || filterType === 'total') return data;
+    if (!filterType || filterType === "total") return data;
 
-    return data.filter(item => {
-        if (selectedRange === "today") {
-            if (filterType === 'checkin') return item.checkinTime !== "-";
-            if (filterType === 'checkout') return item.checkoutTime !== "-";
-            if (filterType === 'late') return item.status?.includes("สาย");
-            if (filterType === 'absent') return item.status?.includes("ลา") || item.status === "ขาดงาน";
-            if (filterType === 'outside') return item.status?.includes("นอกพื้นที่");
-        } else { // Range view (Grouped)
-            if (filterType === 'checkin') return item.summary.checkin > 0;
-            if (filterType === 'checkout') return item.summary.checkout > 0;
-            if (filterType === 'late') return item.summary.late > 0;
-            // นับรวม ขาดงาน + ลา ใน filterType='absent'
-            if (filterType === 'absent') return item.summary.absent > 0 || item.summary.leave > 0;
-            if (filterType === 'outside') return item.summary.outside > 0;
-        }
-        return true;
+    return data.filter((item) => {
+      if (selectedRange === "today") {
+        if (filterType === "checkin") return item.checkinTime !== "-";
+        if (filterType === "checkout") return item.checkoutTime !== "-";
+        if (filterType === "late") return item.status?.includes("สาย");
+        if (filterType === "absent")
+          return item.status?.includes("ลา") || item.status === "ขาดงาน";
+        if (filterType === "outside") return item.status?.includes("นอกพื้นที่");
+      } else {
+        if (filterType === "checkin") return item.summary.checkin > 0;
+        if (filterType === "checkout") return item.summary.checkout > 0;
+        if (filterType === "late") return item.summary.late > 0;
+        if (filterType === "absent")
+          return item.summary.absent > 0 || item.summary.leave > 0;
+        if (filterType === "outside") return item.summary.outside > 0;
+      }
+      return true;
     });
   }, [todayData, groupedRangeData, filterType, selectedRange]);
 
+  // 8. Stats Calculation (แก้ไขให้ Total นับตามสาขา)
   const summaryStats = useMemo(() => {
-  let late = 0, absent = 0, outside = 0, checkinsCount = 0, checkoutsCount = 0;
+    let late = 0,
+      absent = 0,
+      outside = 0,
+      checkinsCount = 0,
+      checkoutsCount = 0;
 
-  if (selectedRange === "today") {
-    todayData.forEach((d) => {
-      if (d.checkinTime !== "-") checkinsCount++;
+    if (selectedRange === "today") {
+      todayData.forEach((d) => {
+        if (d.checkinTime !== "-") checkinsCount++;
         if (d.checkoutTime !== "-") checkoutsCount++;
         if (d.status?.includes("สาย")) late++;
         if (d.status?.includes("หยุด") || d.status?.includes("ลา")) absent++;
-        if (d.status === "ขาดงาน") absent++; 
+        if (d.status === "ขาดงาน") absent++;
         if (d.status?.includes("นอกพื้นที่")) outside++;
       });
     } else {
       groupedRangeData.forEach((d) => {
         late += d.summary.late;
-        // รวมขาดงานและลาสำหรับการ์ดเดียว
-        absent += (d.summary.absent + d.summary.leave); 
+        absent += d.summary.absent + d.summary.leave;
         outside += d.summary.outside;
         checkinsCount += d.summary.checkin;
         checkoutsCount += d.summary.checkout;
@@ -360,60 +450,63 @@ const Dashboard = () => {
     }
 
     return {
-      totalEmployees: employees.length,
+      // ✅ แก้ไข: ใช้ branchEmployees.length แทน employees.length
+      totalEmployees: branchEmployees.length,
       todayCheckins: checkinsCount,
       todayCheckouts: checkoutsCount,
       late,
       absent,
       outside,
     };
-}, [todayData, groupedRangeData, selectedRange, employees.length]);
+  }, [todayData, groupedRangeData, selectedRange, branchEmployees.length, employees.length]);
 
   const handleCardClick = (type) => {
-      setFilterType(prev => prev === type ? null : type);
+    setFilterType((prev) => (prev === type ? null : type));
   };
 
   const getCardStyle = (type, bgColor) => {
-      const isSelected = filterType === type;
-      return {
-          background: bgColor,
-          cursor: "pointer",
-          transition: "all 0.3s",
-          border: isSelected ? "2px solid #ff6b35" : "1px solid #f0f0f0",
-          transform: isSelected ? "scale(1.02)" : "scale(1)",
-          boxShadow: isSelected ? "0 4px 12px rgba(255, 107, 53, 0.2)" : "none"
-      };
+    const isSelected = filterType === type;
+    return {
+      background: bgColor,
+      cursor: "pointer",
+      transition: "all 0.3s",
+      border: isSelected ? "2px solid #ff6b35" : "1px solid #f0f0f0",
+      transform: isSelected ? "scale(1.02)" : "scale(1)",
+      boxShadow: isSelected ? "0 4px 12px rgba(255, 107, 53, 0.2)" : "none",
+    };
   };
 
   const todayColumns = [
     { title: "รหัส", dataIndex: "employeeId", width: 100 },
-    { 
-        title: "ชื่อ - สกุล", 
-        dataIndex: "name", 
-        render: (text, record) => (
-            <div style={{display:'flex', alignItems:'center', gap:10}}>
-                <Avatar icon={<UserOutlined />} src={record.pictureUrl} />
-                <div>{text}</div>
-            </div>
-        )
+    {
+      title: "ชื่อ - สกุล",
+      dataIndex: "name",
+      render: (text, record) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Avatar icon={<UserOutlined />} src={record.pictureUrl} />
+          <div>{text}</div>
+        </div>
+      ),
     },
     { title: "สาขา", dataIndex: "branch", width: 150 },
-    { 
-        title: "เวลาเข้า", 
-        dataIndex: "checkinTime", 
-        align: 'center',
-        render: (t) => t !== "-" ? <Tag color="blue">{t}</Tag> : <span style={{color:'#ccc'}}>-</span>
+    {
+      title: "เวลาเข้า",
+      dataIndex: "checkinTime",
+      align: "center",
+      render: (t) =>
+        t !== "-" ? <Tag color="blue">{t}</Tag> : <span style={{ color: "#ccc" }}>-</span>,
     },
-    { 
-        title: "เวลาออก", 
-        dataIndex: "checkoutTime",
-        align: 'center',
-        render: (t) => t !== "-" ? <Tag color="cyan">{t}</Tag> : <span style={{color:'#ccc'}}>-</span>
+    {
+      title: "เวลาออก",
+      dataIndex: "checkoutTime",
+      align: "center",
+      render: (t) =>
+        t !== "-" ? <Tag color="cyan">{t}</Tag> : <span style={{ color: "#ccc" }}>-</span>,
     },
     {
       title: "สถานะ",
       dataIndex: "status",
-      align: 'center',
+      align: "center",
       render: (text, record) => {
         let color = "green";
         if (text?.includes("สาย")) color = "orange";
@@ -421,17 +514,19 @@ const Dashboard = () => {
         if (text === "ขาดงาน") color = "red";
         if (text?.includes("นอกพื้นที่")) color = "purple";
         return (
-            <div style={{display:'flex', flexDirection:'column', alignItems:'center'}}>
-                <Tag color={color}>{text}</Tag>
-                {record.isAutoAbsent && <small style={{color:'red', fontSize:10}}>*Server Auto</small>}
-            </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <Tag color={color}>{text}</Tag>
+            {record.isAutoAbsent && (
+              <small style={{ color: "red", fontSize: 10 }}>*Server Auto</small>
+            )}
+          </div>
         );
       },
     },
     {
       title: "ค่าปรับ",
       dataIndex: "fine",
-      align: 'right',
+      align: "right",
       render: (f) => (f > 0 ? <Text type="danger">{f} ฿</Text> : "-"),
     },
   ];
@@ -505,7 +600,9 @@ const Dashboard = () => {
         dataSource={record.history}
         size="small"
         pagination={false}
-        rowKey={(r) => `${r.employeeId}_${r.date}_${r.checkinTime}_${r.__isLeave ? "leave" : "in"}`}
+        rowKey={(r) =>
+          `${r.employeeId}_${r.date}_${r.checkinTime}_${r.__isLeave ? "leave" : "in"}`
+        }
       />
     );
   };
@@ -519,49 +616,66 @@ const Dashboard = () => {
         />
       )}
 
-      {/* ✅ CARD แจ้งสถานะ (Monitor Mode) */}
+      {/* ✅ CARD แจ้งสถานะ */}
       <Card
-        styles={{ body: { padding: '0' } }} 
-        style={{ borderRadius: 12, marginBottom: 20, background: "#fff", overflow: "hidden" }}
+        styles={{ body: { padding: "0" } }}
+        style={{
+          borderRadius: 12,
+          marginBottom: 20,
+          background: "#fff",
+          overflow: "hidden",
+        }}
       >
         <div>
-           {isCutoffDone ? (
-              <Alert 
-                message="สถานะการตัดยอดประจำวัน (Server)"
-                description={
-                    <span>
-                        <CheckCircleFilled style={{ color: '#52c41a', marginRight: 8 }} />
-                        <b>ระบบ Server (GitHub Actions) ได้ทำการตัดยอดแล้ว</b>
-                    </span>
-                }
-                type="success"
-                showIcon={false}
-                style={{ borderLeft: '5px solid #52c41a' }}
-             />
-           ) : (
-              <Alert 
-                message="รอการตัดยอดอัตโนมัติ (Server)"
-                description={
-                    <span>
-                        <InfoCircleOutlined style={{ color: '#1890ff', marginRight: 8 }} />
-                        ระบบ Server จะทำงานอัตโนมัติหลังเวลา <b>{cutoffTimeStr} น.</b> (คุณสามารถปิดหน้าจอนี้ได้)
-                        {absentEmployeesList.length > 0 && <span style={{marginLeft: 10}}> | ⚠️ <b>รอตัดยอด: {absentEmployeesList.length} คน</b></span>}
-                    </span>
-                }
-                type="info"
-                showIcon={false}
-                style={{ borderLeft: '5px solid #1890ff' }}
+          {isCutoffDone ? (
+            <Alert
+              message="สถานะการตัดยอดประจำวัน (Server)"
+              description={
+                <span>
+                  <CheckCircleFilled style={{ color: "#52c41a", marginRight: 8 }} />
+                  <b>ระบบ Server (GitHub Actions) ได้ทำการตัดยอดแล้ว</b>
+                </span>
+              }
+              type="success"
+              showIcon={false}
+              style={{ borderLeft: "5px solid #52c41a" }}
             />
-           )}
+          ) : (
+            <Alert
+              message="รอการตัดยอดอัตโนมัติ (Server)"
+              description={
+                <span>
+                  <InfoCircleOutlined style={{ color: "#1890ff", marginRight: 8 }} />
+                  ระบบ Server จะทำงานอัตโนมัติหลังเวลา <b>{cutoffTimeStr} น.</b>{" "}
+                  (คุณสามารถปิดหน้าจอนี้ได้)
+                  {absentEmployeesList.length > 0 && (
+                    <span style={{ marginLeft: 10 }}>
+                      {" "}
+                      | ⚠️ <b>รอตัดยอด: {absentEmployeesList.length} คน</b>
+                    </span>
+                  )}
+                </span>
+              }
+              type="info"
+              showIcon={false}
+              style={{ borderLeft: "5px solid #1890ff" }}
+            />
+          )}
         </div>
       </Card>
 
       {/* Summary Cards */}
       <Card
-        styles={{ body: { padding: '20px' } }}
+        styles={{ body: { padding: "20px" } }}
         style={{ borderRadius: 12, marginBottom: 20, background: "#fff" }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <Select
             value={selectedRange}
             onChange={setSelectedRange}
@@ -573,27 +687,99 @@ const Dashboard = () => {
             style={{ width: 150 }}
             size="large"
           />
-          
-           {filterType && (
-              <Button type="link" onClick={() => handleCardClick(null)} danger>
-                  ล้างตัวกรอง
-              </Button>
+
+          {filterType && (
+            <Button type="link" onClick={() => handleCardClick(null)} danger>
+              ล้างตัวกรอง
+            </Button>
           )}
         </div>
 
         <Row gutter={[16, 16]} style={{ marginTop: 15 }}>
-          {/* ✅ Card Clicks ถูกเรียกใช้ที่นี่ */}
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('total', "#FFE2E5")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('total')}><Statistic title="พนักงานทั้งหมด" value={summaryStats.totalEmployees} prefix={<UserOutlined />} /></Card></Col>
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('checkin', "#FFF4DE")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('checkin')}><Statistic title="เข้างาน" value={summaryStats.todayCheckins} prefix={<CheckCircleOutlined />} /></Card></Col>
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('late', "#DCFCE7")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('late')}><Statistic title="มาสาย" value={summaryStats.late} prefix={<ClockCircleOutlined />} /></Card></Col>
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('absent', "#F3E8FF")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('absent')}><Statistic title="ขาด/ลา" value={summaryStats.absent} prefix={<CloseCircleOutlined />} /></Card></Col>
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('outside', "#E6F7FF")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('outside')}><Statistic title="นอกพื้นที่" value={summaryStats.outside} prefix={<CarOutlined />} /></Card></Col>
-          <Col xs={12} sm={8} md={4}><Card style={getCardStyle('checkout', "#FFF")} styles={{ body: { padding: 15 } }} onClick={() => handleCardClick('checkout')}><Statistic title="เช็คเอาท์" value={summaryStats.todayCheckouts} /></Card></Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("total", "#FFE2E5")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("total")}
+            >
+              <Statistic
+                title="พนักงานทั้งหมด"
+                value={summaryStats.totalEmployees}
+                prefix={<UserOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("checkin", "#FFF4DE")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("checkin")}
+            >
+              <Statistic
+                title="เข้างาน"
+                value={summaryStats.todayCheckins}
+                prefix={<CheckCircleOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("late", "#DCFCE7")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("late")}
+            >
+              <Statistic
+                title="มาสาย"
+                value={summaryStats.late}
+                prefix={<ClockCircleOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("absent", "#F3E8FF")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("absent")}
+            >
+              <Statistic
+                title="ขาด/ลา"
+                value={summaryStats.absent}
+                prefix={<CloseCircleOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("outside", "#E6F7FF")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("outside")}
+            >
+              <Statistic
+                title="นอกพื้นที่"
+                value={summaryStats.outside}
+                prefix={<CarOutlined />}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={4}>
+            <Card
+              style={getCardStyle("checkout", "#FFF")}
+              styles={{ body: { padding: 15 } }}
+              onClick={() => handleCardClick("checkout")}
+            >
+              <Statistic title="เช็คเอาท์" value={summaryStats.todayCheckouts} />
+            </Card>
+          </Col>
         </Row>
       </Card>
 
+   
       {/* MAIN TABLE */}
-      <Card style={{ borderRadius: 12 }} styles={{ body: { padding: 24 } }} title="รายการลงเวลา">
+      <Card
+        style={{ borderRadius: 12 }}
+        styles={{ body: { padding: 24 } }}
+        title="รายการลงเวลา"
+      >
         <div style={{ marginBottom: 20 }}>
           <span style={{ marginRight: 12, fontWeight: 500 }}>สาขา :</span>
           <Select
@@ -606,15 +792,13 @@ const Dashboard = () => {
             optionFilterProp="label"
           />
         </div>
- 
+
         <Table
           dataSource={filteredDataSource}
           columns={selectedRange === "today" ? todayColumns : rangeColumns}
           rowKey={(r) => r.employeeId}
           expandable={
-            selectedRange !== "today"
-              ? { expandedRowRender }
-              : undefined
+            selectedRange !== "today" ? { expandedRowRender } : undefined
           }
           bordered
           pagination={{
