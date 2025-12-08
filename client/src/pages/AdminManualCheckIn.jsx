@@ -16,7 +16,7 @@ import {
   Row,
   Col,
   Alert,
-  Radio // ✅ เพิ่ม Radio สำหรับเลือกกะ
+  Radio 
 } from "antd";
 import {
   CalendarOutlined,
@@ -25,7 +25,6 @@ import {
   ReloadOutlined,
   CalculatorOutlined,
   SearchOutlined,
-  FieldTimeOutlined // ✅ เพิ่ม Icon กะ
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
@@ -117,7 +116,6 @@ export default function AdminDailyManage() {
       const attendanceMap = {};
       checkinSnap.forEach(doc => {
         const data = doc.data();
-        // ✅ เก็บข้อมูล shift ด้วย (default เป็น 1)
         attendanceMap[data.employeeId] = { ...data, docId: doc.id, type: 'checkin', shift: data.shift || 1 };
       });
 
@@ -150,7 +148,7 @@ export default function AdminDailyManage() {
         let displayBranch = emp.branch || (emp.branches ? emp.branches[0] : "-");
         let displayFine = 0;
         let displayNote = "";
-        let displayShift = 1; // Default Shift
+        let displayShift = 1;
 
         if (checkinRecord) {
             finalRecord = checkinRecord;
@@ -160,7 +158,7 @@ export default function AdminDailyManage() {
             displayBranch = checkinRecord.branch;
             displayFine = checkinRecord.fine;
             displayNote = checkinRecord.manualNote || checkinRecord.note;
-            displayShift = checkinRecord.shift; // ใช้ค่าจริงจาก DB
+            displayShift = checkinRecord.shift; 
         } else if (leaveRecord) {
             finalRecord = leaveRecord;
             displayStatus = leaveRecord.status;
@@ -184,7 +182,7 @@ export default function AdminDailyManage() {
           branch: displayBranch,
           fine: displayFine,
           note: displayNote,
-          shift: displayShift // ✅ ส่งค่า shift ไปแสดงผล
+          shift: displayShift 
         };
       });
 
@@ -199,7 +197,8 @@ export default function AdminDailyManage() {
 
   // ✅ 3. Logic คำนวณสถานะ (รองรับ 2 กะ และเวลาตามสาขา)
   const calculateAutoStatus = (timeObj, branchName, shift) => {
-    if (!settings || !timeObj) return { status: "ปกติ", fine: 0 };
+    // ✅ แก้ไขค่าเริ่มต้นเป็น "มาปกติ"
+    if (!settings || !timeObj) return { status: "มาปกติ", fine: 0 };
     
     // 1. หา Config ของสาขาที่เลือก
     const branchConfig = branches.find(b => b.name === branchName);
@@ -229,10 +228,11 @@ export default function AdminDailyManage() {
     const minutes = timeToMinutes(timeStr);
     const { lateFine20, lateFine50, absentFine } = settings;
 
-    let status = "ปกติ";
+    // ✅ แก้ไข string เป็น "มาปกติ"
+    let status = "มาปกติ";
     let fine = 0;
 
-    if (minutes <= lateAfter) { status = "ปกติ"; fine = 0; }
+    if (minutes <= lateAfter) { status = "มาปกติ"; fine = 0; }
     else if (minutes <= t1) { status = "มาสาย (ระดับ 1)"; fine = lateFine20 || 0; }
     else if (minutes <= t2) { status = "มาสาย (ระดับ 2)"; fine = lateFine50 || 0; }
     else { status = "ขาดงาน/สายมาก"; fine = absentFine || 0; }
@@ -258,10 +258,11 @@ export default function AdminDailyManage() {
       checkinTime: record.checkinTime !== "-" ? dayjs(record.checkinTime, "HH:mm") : null,
       checkoutTime: record.checkoutTime !== "-" && record.checkoutTime !== null ? dayjs(record.checkoutTime, "HH:mm") : null,
       branch: record.branch !== "-" ? record.branch : record.defaultBranch,
-      status: record.status === "ยังไม่ลงเวลา" ? "ปกติ" : record.status, 
+      // ✅ แก้ไข Default status เป็น "มาปกติ"
+      status: record.status === "ยังไม่ลงเวลา" ? "มาปกติ" : record.status, 
       fine: record.fine || 0,
       note: record.note,
-      shift: record.shift || 1 // ✅ Load shift
+      shift: record.shift || 1 
     });
   };
 
@@ -276,7 +277,7 @@ export default function AdminDailyManage() {
         checkinTime: checkinTimeStr,
         checkoutTime: checkoutTimeStr,
         branch: values.branch,
-        shift: values.shift || 1, // ✅ บันทึก Shift
+        shift: values.shift || 1, 
         status: values.status,
         fine: Number(values.fine) || 0,
         manualNote: values.note || "",
@@ -338,7 +339,7 @@ export default function AdminDailyManage() {
       )
     },
     {
-        title: "กะ", // ✅ เพิ่มคอลัมน์ กะ
+        title: "กะ", 
         dataIndex: "shift",
         key: "shift",
         width: 80,
@@ -367,6 +368,7 @@ export default function AdminDailyManage() {
       render: (status) => {
         let color = "default";
         if (status === "ยังไม่ลงเวลา") color = "default";
+        // หมายเหตุ: ใช้ .includes("ปกติ") จะครอบคลุมทั้ง "ปกติ" และ "มาปกติ"
         else if (status.includes("ปกติ")) color = "success";
         else if (status.includes("สาย")) color = "warning";
         else if (status.includes("ขาด") || status.includes("พื้นที่")) color = "error";
@@ -413,13 +415,13 @@ export default function AdminDailyManage() {
           <Col>
             <Space>
               <Input 
-                 placeholder="ค้นหาชื่อ / รหัส" 
-                 prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-                 value={searchText}
-                 onChange={(e) => setSearchText(e.target.value)}
-                 style={{ width: 200 }}
-                 allowClear
-              />
+                  placeholder="ค้นหาชื่อ / รหัส" 
+                  prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  style={{ width: 200 }}
+                  allowClear
+               />
 
               <Button icon={<ReloadOutlined />} onClick={() => fetchDailyData(selectedDate)} />
               <span style={{ fontSize: 16 }}>วันที่: </span>
@@ -471,7 +473,6 @@ export default function AdminDailyManage() {
         <Form form={form} layout="vertical" onFinish={handleSave}>
           
           <Row gutter={16}>
-             {/* ✅ เพิ่มตัวเลือกกะ */}
              <Col span={12}>
                 <Form.Item name="shift" label="กะการทำงาน">
                     <Radio.Group onChange={triggerAutoCalc} buttonStyle="solid">
@@ -506,7 +507,8 @@ export default function AdminDailyManage() {
              <Col span={12}>
                 <Form.Item name="status" label="สถานะ" rules={[{ required: true }]}>
                     <Select>
-                        <Option value="ปกติ">ปกติ</Option>
+                        {/* ✅ เปลี่ยน Option เป็น "มาปกติ" */}
+                        <Option value="มาปกติ">มาปกติ</Option>
                         <Option value="มาสาย (ระดับ 1)">มาสาย (ระดับ 1)</Option>
                         <Option value="มาสาย (ระดับ 2)">มาสาย (ระดับ 2)</Option>
                         <Option value="ขาดงาน/สายมาก">ขาดงาน/สายมาก</Option>

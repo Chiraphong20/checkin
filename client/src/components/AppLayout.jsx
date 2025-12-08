@@ -19,7 +19,7 @@ const { Header, Content, Sider } = Layout;
 const AppLayout = ({ username, onLogout, userPictureUrl }) => {
   const [collapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(dayjs());
-  const [pictureUrl, setPictureUrl] = useState(userPictureUrl);
+  const [pictureUrl, setPictureUrl] = useState(userPictureUrl); // เริ่มต้นด้วยค่าที่รับมาจาก props
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -27,8 +27,9 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
     token: { colorBgContainer },
   } = theme.useToken();
 
-  // 🔧 อ่าน pictureUrl จาก localStorage และจัดการการอัพเดท
+  // 🔧 จัดการการอัพเดทรูปภาพ
   useEffect(() => {
+    // ฟังก์ชันโหลดรูปจาก LocalStorage
     const loadPictureUrl = () => {
       try {
         const adminUser = localStorage.getItem("admin_user");
@@ -43,9 +44,10 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
       }
     };
 
+    // โหลดครั้งแรกตอนเริ่มหน้าเว็บ
     loadPictureUrl();
 
-    // 🔧 ฟังเหตุการณ์เมื่อข้อมูล admin ถูกอัพเดท
+    // 🔧 ฟังเหตุการณ์เมื่อข้อมูล admin ถูกอัพเดท (จาก AdminProfile.js)
     window.addEventListener('adminDataUpdated', loadPictureUrl);
 
     return () => {
@@ -232,7 +234,7 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
                     borderRadius: "8px",
                   }}
                 >
-                  {/* 🔧 ใช้ pictureUrl จาก state แทน */}
+                  {/* 🔧 ใช้ pictureUrl จาก state */}
                   <Avatar
                     src={pictureUrl}
                     size={40}

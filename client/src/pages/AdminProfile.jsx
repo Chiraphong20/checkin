@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Card, Button, Spin, Typography, Row, Col, Divider, message, Modal, Form, Input, Upload, Avatar } from "antd";
-import { EditFilled, SaveOutlined, UploadOutlined, UserOutlined, PhoneOutlined, MailOutlined, LockOutlined } from "@ant-design/icons";
+import { EditFilled, SaveOutlined, UploadOutlined, UserOutlined, PhoneOutlined, MailOutlined, LockOutlined, CameraOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
@@ -12,6 +12,7 @@ const placeholderImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB
 
 export default function AdminProfile() {
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false); // สถานะตอนอัปโหลดรูป
   const [adminData, setAdminData] = useState(null);
   const [adminDocId, setAdminDocId] = useState(null);
 
@@ -24,8 +25,6 @@ export default function AdminProfile() {
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [passwordForm] = Form.useForm();
   const [savingPassword, setSavingPassword] = useState(false);
-
-  const [previewImage, setPreviewImage] = useState("");
 
   const navigate = useNavigate();
 
@@ -69,26 +68,65 @@ export default function AdminProfile() {
     fetchAdminData();
   }, [navigate]);
 
-  // 2️⃣ เปิด Modal แก้ไขข้อมูลทั่วไป
+  // 2️⃣ ฟังก์ชันเปลี่ยนรูปภาพทันที (Direct Upload)
+  const handleDirectImageChange = async (file) => {
+    // ✅ เช็คขนาด 1MB (1024 * 1024)
+    const isLt1M = file.size / 1024 / 1024 < 1;
+    if (!isLt1M) {
+      message.error('รูปภาพต้องมีขนาดเล็กกว่า 1MB');
+      return Upload.LIST_IGNORE;
+    }
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = async () => {
+        const base64 = reader.result;
+        
+        try {
+            setUploading(true);
+            // อัปเดต Firestore ทันที
+            const adminRef = doc(db, "admins", adminDocId);
+            await updateDoc(adminRef, { pictureUrl: base64 });
+
+            // อัปเดต State
+            setAdminData(prev => ({ ...prev, pictureUrl: base64 }));
+
+            // อัปเดต LocalStorage
+            const oldUser = JSON.parse(localStorage.getItem("admin_user") || "{}");
+            localStorage.setItem("admin_user", JSON.stringify({ ...oldUser, pictureUrl: base64 }));
+
+            // ✅ ส่ง Event บอก AppLayout
+            window.dispatchEvent(new Event("adminDataUpdated"));
+
+            message.success("เปลี่ยนรูปโปรไฟล์สำเร็จ");
+        } catch (error) {
+            console.error("Upload error:", error);
+            message.error("อัปโหลดรูปภาพไม่สำเร็จ");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    return false; // ไม่ต้อง Auto Upload ของ Antd (เราจัดการเอง)
+  };
+
+  // 3️⃣ เปิด Modal แก้ไขข้อมูลทั่วไป (ไม่รวมรูปแล้ว)
   const handleEditClick = () => {
-    const currentPic = adminData.pictureUrl || "";
-    setPreviewImage(currentPic);
     editForm.setFieldsValue({
       name: adminData.name || "",
       phone: adminData.phone || "",
-      email: adminData.email || "",
-      pictureUrl: currentPic
+      email: adminData.email || ""
     });
     setIsEditModalOpen(true);
   };
 
-  // 3️⃣ เปิด Modal แก้ไขรหัสผ่าน
+  // 4️⃣ เปิด Modal แก้ไขรหัสผ่าน
   const handlePasswordEditClick = () => {
     passwordForm.resetFields();
     setIsPasswordModalOpen(true);
   };
 
-  // 4️⃣ บันทึกข้อมูลทั่วไป
+  // 5️⃣ บันทึกข้อมูลทั่วไป (ชื่อ, อีเมล, เบอร์)
   const handleSave = async (values) => {
     if (!adminDocId) return;
 
@@ -99,8 +137,7 @@ export default function AdminProfile() {
       const dataToUpdate = {
         name: values.name || "",
         phone: values.phone || "",
-        email: values.email || "",
-        pictureUrl: values.pictureUrl || ""
+        email: values.email || ""
       };
 
       await updateDoc(adminRef, dataToUpdate);
@@ -110,14 +147,13 @@ export default function AdminProfile() {
       const oldUser = JSON.parse(localStorage.getItem("admin_user") || "{}");
       localStorage.setItem("admin_user", JSON.stringify({
         ...oldUser,
-        name: dataToUpdate.name,
-        pictureUrl: dataToUpdate.pictureUrl
+        name: dataToUpdate.name
       }));
+
+      window.dispatchEvent(new Event("adminDataUpdated"));
 
       message.success("บันทึกข้อมูลสำเร็จ");
       setIsEditModalOpen(false);
-      window.location.reload(); 
-
     } catch (err) {
       console.error("Save error:", err);
       message.error("บันทึกไม่สำเร็จ");
@@ -126,7 +162,7 @@ export default function AdminProfile() {
     }
   };
 
-  // 5️⃣ บันทึกรหัสผ่านใหม่
+  // 6️⃣ บันทึกรหัสผ่านใหม่
   const handlePasswordSave = async (values) => {
     if (!adminDocId) return;
     
@@ -148,24 +184,6 @@ export default function AdminProfile() {
     }
   };
 
-  // ฟังก์ชันจัดการรูปภาพ
-  const handleImageUpload = (file) => {
-    const isLt500K = file.size / 1024 / 1024 < 0.5;
-    if (!isLt500K) {
-      message.error('รูปภาพต้องมีขนาดเล็กกว่า 500KB');
-      return false;
-    }
-
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      const base64 = reader.result;
-      setPreviewImage(base64);
-      editForm.setFieldsValue({ pictureUrl: base64 });
-    };
-    return false;
-  };
-
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
@@ -177,7 +195,7 @@ export default function AdminProfile() {
   if (!adminData) return null;
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1000px", margin: "0 auto" }}>
+    <div style={{ padding: "0", maxWidth: "100%", margin: "0" }}>
       
       {/* Header */}
       <div style={{
@@ -202,32 +220,71 @@ export default function AdminProfile() {
       }}>
         <Row gutter={[40, 40]}>
           
-          {/* Profile Picture */}
+          {/* ✅ Profile Picture + Direct Edit Button */}
           <Col xs={24} md={8} style={{ display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
-            <div style={{
-              border: "4px solid #eee",
-              borderRadius: "12px",
-              padding: "5px",
-              width: "100%",
-              maxWidth: "220px",
-              aspectRatio: "3/4",
-              overflow: "hidden",
-              backgroundColor: "#f0f0f0"
-            }}>
-              <img
-                src={adminData.pictureUrl || placeholderImage}
-                alt="Profile"
-                style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}
-                onError={(e) => { e.target.src = "https://via.placeholder.com/300x400?text=No+Image"; }}
-              />
+            <div style={{ position: 'relative', width: "100%", maxWidth: "220px" }}>
+                <div style={{
+                    border: "4px solid #eee",
+                    borderRadius: "12px",
+                    padding: "5px",
+                    width: "100%",
+                    aspectRatio: "3/4",
+                    overflow: "hidden",
+                    backgroundColor: "#f0f0f0"
+                }}>
+                    <Spin spinning={uploading}>
+                        <img
+                            src={adminData.pictureUrl || placeholderImage}
+                            alt="Profile"
+                            style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}
+                            onError={(e) => { e.target.src = "https://via.placeholder.com/300x400?text=No+Image"; }}
+                        />
+                    </Spin>
+                </div>
+
+                {/* ✅ ปุ่มแก้ไขรูปภาพวางอยู่บนรูปเลย */}
+                <Upload
+                    beforeUpload={handleDirectImageChange}
+                    showUploadList={false}
+                    accept="image/png, image/jpeg, image/jpg"
+                >
+                    <Button 
+                        type="primary" 
+                        shape="circle" 
+                        icon={<CameraOutlined />} 
+                        size="large"
+                        style={{
+                            position: "absolute",
+                            bottom: "15px",
+                            right: "15px",
+                            boxShadow: "0 4px 8px rgba(0,0,0,0.2)",
+                            border: "2px solid white",
+                            width: "50px",
+                            height: "50px"
+                        }}
+                    />
+                </Upload>
             </div>
           </Col>
 
           {/* Details */}
+      {/* Details Column */}
           <Col xs={24} md={16}>
-            {/* ข้อมูลส่วนตัว */}
+            
+            {/* ✅ ส่วนที่ 1: ข้อมูลส่วนตัว + ปุ่มแก้ไข (ย้ายมาตรงนี้) */}
             <div style={{ marginBottom: "30px" }}>
-              <Title level={4} style={{ marginBottom: "20px", color: "#333" }}>ข้อมูลส่วนตัว</Title>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                <Title level={4} style={{ margin: 0, color: "#333" }}>ข้อมูลส่วนตัว</Title>
+                <Button
+                  type="primary"
+                  icon={<EditFilled />}
+                  style={{ background: "#F39C12", borderColor: "#F39C12", borderRadius: "20px", fontWeight: "bold" }}
+                  onClick={handleEditClick}
+                >
+                  แก้ไขข้อมูล
+                </Button>
+              </div>
+
               <Row style={{ marginBottom: "12px" }}>
                 <Col span={8}><Text type="secondary" style={{ fontSize: "16px" }}>รหัสผู้ใช้งาน</Text></Col>
                 <Col span={16}><Text strong style={{ fontSize: "16px" }}>{adminData.username}</Text></Col>
@@ -244,17 +301,9 @@ export default function AdminProfile() {
 
             <Divider />
 
-            {/* ข้อมูลทั่วไป */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            {/* ✅ ส่วนที่ 2: ข้อมูลทั่วไป (เอาปุ่มออกแล้ว) */}
+            <div style={{ marginBottom: "20px" }}>
               <Title level={4} style={{ margin: 0, color: "#333" }}>ข้อมูลทั่วไป</Title>
-              <Button
-                type="primary"
-                icon={<EditFilled />}
-                style={{ background: "#F39C12", borderColor: "#F39C12", borderRadius: "20px", fontWeight: "bold" }}
-                onClick={handleEditClick}
-              >
-                แก้ไข
-              </Button>
             </div>
 
             <Row style={{ marginBottom: "12px" }}>
@@ -268,7 +317,7 @@ export default function AdminProfile() {
 
             <Divider />
 
-            {/* รหัสผ่าน */}
+            {/* ส่วนที่ 3: รหัสผ่าน (เหมือนเดิม) */}
             <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
                     <Title level={4} style={{ marginBottom: "10px", color: "#333" }}>รหัสผ่าน</Title>
@@ -278,7 +327,7 @@ export default function AdminProfile() {
                         style={{ background: "#F39C12", borderColor: "#F39C12", borderRadius: "20px", fontWeight: "bold" }}
                         onClick={handlePasswordEditClick}
                     >
-                        แก้ไข
+                        เปลี่ยนรหัสผ่าน
                     </Button>
                 </div>
                 <Row>
@@ -290,7 +339,7 @@ export default function AdminProfile() {
         </Row>
       </div>
 
-      {/* Modal แก้ไขข้อมูลทั่วไป */}
+      {/* Modal แก้ไขข้อมูลทั่วไป (เอาส่วนอัปโหลดรูปออกแล้ว) */}
       <Modal
         title="แก้ไขข้อมูลส่วนตัว"
         open={isEditModalOpen}
@@ -309,24 +358,6 @@ export default function AdminProfile() {
 
           <Form.Item label="เบอร์โทรศัพท์" name="phone">
             <Input size="large" prefix={<PhoneOutlined />} />
-          </Form.Item>
-
-          <Form.Item label="รูปโปรไฟล์">
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                {previewImage && (
-                    <Avatar size={100} src={previewImage} style={{ marginBottom: 10, border: '2px solid #eee' }} />
-                )}
-                <Upload
-                    beforeUpload={handleImageUpload}
-                    showUploadList={false}
-                    accept="image/png, image/jpeg, image/jpg"
-                >
-                    <Button icon={<UploadOutlined />}>เลือกรูปจากเครื่อง (Max 500KB)</Button>
-                </Upload>
-                <Form.Item name="pictureUrl" noStyle>
-                    <Input type="hidden" />
-                </Form.Item>
-            </div>
           </Form.Item>
 
           <Button 
