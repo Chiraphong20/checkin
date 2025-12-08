@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-// ✅ เพิ่ม Spin เข้าไปในบรรทัดนี้ครับ
 import { Select, Button, Modal, message, DatePicker, Typography, Form, Space, Input, List, Popconfirm, Card, AutoComplete, Spin } from "antd";
 import { SaveOutlined, DeleteOutlined, CalendarOutlined, PlusOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, orderBy, query } from "firebase/firestore";
@@ -43,7 +42,7 @@ const getEventColor = (type, isHoliday) => {
     case "ลาป่วย": return "#1890ff"; // น้ำเงิน
     case "ลากิจ": return "#52c41a";  // เขียว
     case "พักร้อน": return "#faad14"; // ส้ม
-    case "ขาดงาน": return "#ff4d4f"; // แดงเข้ม
+    case "หยุด": return "#ff4d4f";   // ✅ เปลี่ยนจาก ขาดงาน เป็น หยุด (สีแดงเข้ม)
     default: return "#808080";       // เทา
   }
 };
@@ -398,7 +397,8 @@ export default function EmployeeLeaveCalendar() {
                   <Option value="ลาป่วย">ลาป่วย</Option>
                   <Option value="พักร้อน">พักร้อน</Option>
                   <Option value="หยุดนักขัตฤกษ์">หยุดนักขัตฤกษ์</Option>
-                  <Option value="ขาดงาน">ขาดงาน</Option>
+                  {/* ✅ เปลี่ยนจาก ขาดงาน เป็น หยุด */}
+                  <Option value="หยุด">หยุด</Option>
                </Select>
             </Form.Item>
             <Form.Item label="สถานะการอนุมัติ">
