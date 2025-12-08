@@ -1,0 +1,71 @@
+/* MobileTable.css - เปลี่ยนตารางเป็น Card บนมือถือ */
+
+@media (max-width: 768px) {
+  /* 1. ซ่อนหัวตาราง (Thead) เพราะเราจะดูเป็นรายคนแทน */
+  .ant-table-thead {
+    display: none !important;
+  }
+
+  /* 2. ปรับโครงสร้างตารางให้เป็น Block เพื่อไม่ให้ดันออกข้าง */
+  .ant-table,
+  .ant-table-tbody,
+  .ant-table-container,
+  .ant-table-content {
+    display: block !important;
+    width: 100% !important;
+    overflow: visible !important; /* ปิด Scroll X */
+  }
+
+  /* 3. เปลี่ยนแถว (Row) ให้เป็น การ์ด (Card) */
+  .ant-table-tbody > tr.ant-table-row {
+    display: flex !important;
+    flex-direction: column; /* เรียงข้อมูลลงมาแนวตั้ง */
+    background: #ffffff;
+    border-radius: 12px; /* มุมโค้งมน */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); /* เงาฟุ้งๆ */
+    margin-bottom: 16px; /* ระยะห่างระหว่างการ์ด */
+    padding: 16px;
+    border: 1px solid #f0f0f0;
+    position: relative;
+  }
+
+  /* 4. จัดการแต่ละเซลล์ (Cell) */
+  .ant-table-tbody > tr > td.ant-table-cell {
+    display: flex !important;
+    justify-content: space-between; /* ชิดซ้าย-ขวา */
+    align-items: center;
+    padding: 8px 0 !important;
+    border-bottom: 1px solid #f9f9f9;
+    border-right: none !important; /* เอาเส้นคั่นแนวตั้งออก */
+    font-size: 14px;
+  }
+
+  /* เอาเส้นบรรทัดสุดท้ายออก */
+  .ant-table-tbody > tr > td.ant-table-cell:last-child {
+    border-bottom: none;
+    padding-bottom: 0 !important;
+    margin-top: 8px; /* เว้นระยะปุ่ม Action หน่อย */
+    justify-content: flex-end; /* ปุ่ม Action ชิดขวา */
+    gap: 10px;
+  }
+
+  /* 5. กรณีตารางว่าง (Empty) */
+  .ant-table-placeholder {
+    display: block !important;
+    border: none !important;
+  }
+
+  /* 6. ปรับ Pagination ให้ย่อลง */
+  .ant-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 16px 0 !important;
+  }
+  
+  /* --- เทคนิคพิเศษ: เพิ่ม Label หัวข้อ (Optional) --- */
+  /* ถ้าต้องการให้มีหัวข้อด้านซ้าย (เช่น "ชื่อ:", "สถานะ:") 
+     คุณต้องเพิ่ม prop `title` หรือ `data-label` ใน columns ของ React 
+     แต่ถ้าไม่แก้ React เลย มันจะแสดงแค่ข้อมูลเรียงลงมา ซึ่งก็ดูรู้เรื่องสำหรับ Dashboard
+  */
+}

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import liff from '@line/liff';
-
+import './CSS/AppResponsive.css';
+import './CSS/MobileTable.css';   // ✅ ใส่บรรทัดนี้เพิ่มครับ!
 // Admin Login Page
 import Login from './pages/Login'; 
 

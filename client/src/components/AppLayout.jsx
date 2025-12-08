@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Layout, Menu, Dropdown, Avatar, theme, ConfigProvider } from "antd";
+import { Layout, Menu, Dropdown, Avatar, theme, ConfigProvider, Drawer, Button } from "antd";
 import {
   ShopOutlined,
   SettingOutlined,
@@ -9,17 +9,24 @@ import {
   CalendarOutlined,
   PieChartOutlined,
   UserOutlined,
-  ScheduleOutlined
+  ScheduleOutlined,
+  MenuOutlined // ✅ เพิ่มไอคอนเมนู
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
 
+// ✅ นำเข้าไฟล์ CSS
+import "./AppLayout.css";
+
 const { Header, Content, Sider } = Layout;
 
 const AppLayout = ({ username, onLogout, userPictureUrl }) => {
-  const [collapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(dayjs());
-  const [pictureUrl, setPictureUrl] = useState(userPictureUrl); // เริ่มต้นด้วยค่าที่รับมาจาก props
+  const [pictureUrl, setPictureUrl] = useState(userPictureUrl);
+  
+  // ✅ State สำหรับเปิด/ปิด เมนูในมือถือ
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -27,9 +34,8 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
     token: { colorBgContainer },
   } = theme.useToken();
 
-  // 🔧 จัดการการอัพเดทรูปภาพ
+  // Load Picture Logic (เหมือนเดิม)
   useEffect(() => {
-    // ฟังก์ชันโหลดรูปจาก LocalStorage
     const loadPictureUrl = () => {
       try {
         const adminUser = localStorage.getItem("admin_user");
@@ -43,18 +49,14 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
         console.error("Error loading picture URL:", err);
       }
     };
-
-    // โหลดครั้งแรกตอนเริ่มหน้าเว็บ
     loadPictureUrl();
-
-    // 🔧 ฟังเหตุการณ์เมื่อข้อมูล admin ถูกอัพเดท (จาก AdminProfile.js)
     window.addEventListener('adminDataUpdated', loadPictureUrl);
-
     return () => {
       window.removeEventListener('adminDataUpdated', loadPictureUrl);
     };
   }, []);
 
+  // Clock Logic (เหมือนเดิม)
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(dayjs());
@@ -64,15 +66,12 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
 
   const getSelectedKey = () => {
     const path = location.pathname;
-
     if (path === "/" || path === "/dashboard") return "/dashboard";
     if (path === "/dashboard/adprofile") return "adprofile";
-
     const parts = path.split("/");
     if (parts[1] === "dashboard" && parts[2]) {
       return parts[2];
     }
-
     return path;
   };
 
@@ -104,13 +103,15 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
 
   const getPageTitle = () => {
     if (location.pathname === "/dashboard/adprofile") return "ข้อมูลส่วนตัวผู้ดูแล";
-
     const allMenus = [...mainMenuItems, ...helpMenuItems];
     const found = allMenus.find((item) => item.key === currentKey);
     return found ? found.label : "";
   };
 
   const onMenuClick = ({ key }) => {
+    // ✅ เมื่อกดเมนูในมือถือ ให้ปิด Drawer ด้วย
+    setMobileOpen(false);
+
     if (key === "/dashboard") {
       navigate("/dashboard");
     } else if (key === "logout") {
@@ -121,17 +122,8 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
   };
 
   const userDropdownItems = [
-    {
-      key: "adprofile",
-      icon: <UserOutlined />,
-      label: "โปรไฟล์",
-    },
-    {
-      key: "logout",
-      icon: <LogoutOutlined />,
-      label: "ออกจากระบบ",
-      danger: true,
-    },
+    { key: "adprofile", icon: <UserOutlined />, label: "โปรไฟล์" },
+    { key: "logout", icon: <LogoutOutlined />, label: "ออกจากระบบ", danger: true },
   ];
 
   const onUserMenuClick = ({ key }) => {
@@ -142,6 +134,30 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
     }
   };
 
+  // ✅ Component โลโก้ (ใช้ซ้ำได้ทั้ง Desktop และ Mobile)
+  const LogoComponent = ({ isMobile = false }) => (
+    <div className={isMobile ? "drawer-logo" : "logo-container"}>
+      <img
+        src="/logo.png"
+        alt="Logo"
+        style={{
+          width: "54px",
+          height: "54px",
+          borderRadius: "50%",
+          background: "#ff6b35",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          objectFit: "cover",
+          marginRight: "1px",
+        }}
+      />
+      <span style={{ fontSize: "20px", fontWeight: "700", marginLeft: "10px" }}>
+        วงษ์หิรัญ
+      </span>
+    </div>
+  );
+
   return (
     <ConfigProvider
       theme={{
@@ -151,45 +167,22 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
       }}
     >
       <Layout style={{ minHeight: "100vh", background: "#f5f5f5" }}>
+        
+        {/* ✅ 1. Sider สำหรับ Desktop (ซ่อนเมื่อจอเล็กผ่าน CSS class) */}
         <Sider
           width={250}
+          className="desktop-sider" 
           style={{
             background: "#fff",
             boxShadow: "2px 0 8px rgba(0,0,0,0.1)",
+            position: 'fixed', // Fix sidebar
+            height: '100vh',
+            left: 0,
+            top: 0,
+            zIndex: 100
           }}
         >
-          <div
-            style={{
-              padding: "20px",
-              display: "flex",
-              alignItems: "center",
-              borderBottom: "1px solid #f0f0f0",
-            }}
-          >
-            <div>
-              <img
-                src="/logo.png"
-                alt="Logo"
-                style={{
-                  width: "54px",
-                  height: "54px",
-                  borderRadius: "50%",
-                  background: "#ff6b35",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  objectFit: "cover",
-                  marginRight: "1px",
-                }}
-              />
-            </div>
-            {!collapsed && (
-              <span style={{ fontSize: "20px", fontWeight: "700", marginLeft: "10px" }}>
-                วงษ์หิรัญ
-              </span>
-            )}
-          </div>
-
+          <LogoComponent />
           <Menu
             mode="inline"
             selectedKeys={[currentKey]}
@@ -199,8 +192,28 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
           />
         </Sider>
 
-        <Layout>
+        {/* ✅ 2. Drawer สำหรับ Mobile (แสดงเมื่อกดปุ่ม Hamburger) */}
+        <Drawer
+          placement="left"
+          onClose={() => setMobileOpen(false)}
+          open={mobileOpen}
+          width={250}
+          styles={{ body: { padding: 0 } }} // Reset padding
+        >
+          <LogoComponent isMobile={true} />
+          <Menu
+            mode="inline"
+            selectedKeys={[currentKey]}
+            onClick={onMenuClick}
+            style={{ borderRight: "none" }}
+            items={sidebarItems}
+          />
+        </Drawer>
+
+        {/* Layout ฝั่งขวา (Content) */}
+        <Layout className="site-layout" style={{ marginLeft: window.innerWidth > 768 ? 250 : 0, transition: 'all 0.2s' }}>
           <Header
+            className="site-header"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -210,13 +223,29 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
               borderBottom: "1px solid #f0f0f0",
               height: "70px",
               boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              position: 'sticky',
+              top: 0,
+              zIndex: 99,
+              width: '100%'
             }}
           >
-            <div style={{ fontSize: "20px", fontWeight: "600" }}>
-              {getPageTitle()}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              {/* ✅ ปุ่ม Hamburger (แสดงเฉพาะ Mobile ผ่าน CSS) */}
+              <div className="mobile-menu-trigger" onClick={() => setMobileOpen(true)}>
+                 <MenuOutlined />
+              </div>
+              
+              <div className="page-title" style={{ fontSize: "20px", fontWeight: "600" }}>
+                {getPageTitle()}
+              </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "40px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+              {/* ✅ นาฬิกา (ซ่อนใน Mobile ผ่าน CSS) */}
+              <div className="header-clock" style={{ fontSize: "12px", color: "#8c8c8c" }}>
+                {currentTime.format("DD/MM/YYYY HH:mm:ss")}
+              </div>
+
               <Dropdown
                 menu={{
                   items: userDropdownItems,
@@ -228,13 +257,12 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "16px",
+                    gap: "10px",
                     cursor: "pointer",
                     padding: "4px 8px",
                     borderRadius: "8px",
                   }}
                 >
-                  {/* 🔧 ใช้ pictureUrl จาก state */}
                   <Avatar
                     src={pictureUrl}
                     size={40}
@@ -243,15 +271,12 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
                     {username?.charAt(0)?.toUpperCase()}
                   </Avatar>
 
-                  <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                  {/* ซ่อนชื่อ User ในมือถือถ้ายาวไป หรือจะโชว์ก็ได้ */}
+                  <span style={{ fontSize: "14px", fontWeight: "500", display: 'block' }}>
                     {username || "Admin"}
                   </span>
                 </div>
               </Dropdown>
-
-              <div style={{ fontSize: "12px", color: "#8c8c8c" }}>
-                {currentTime.format("DD/MM/YYYY HH:mm:ss")}
-              </div>
             </div>
           </Header>
 
@@ -261,6 +286,7 @@ const AppLayout = ({ username, onLogout, userPictureUrl }) => {
               padding: "20px",
               background: "#f5f5f5",
               minHeight: "calc(100vh - 70px)",
+              overflow: 'initial'
             }}
           >
             <Outlet />

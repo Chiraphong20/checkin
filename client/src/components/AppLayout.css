@@ -1,0 +1,70 @@
+/* AppLayout.css */
+
+/* --- Default (Desktop) --- */
+
+/* แสดง Sidebar ปกติ */
+.desktop-sider {
+  display: block !important;
+}
+
+/* ซ่อนปุ่มเมนูมือถือ (Hamburger) */
+.mobile-menu-trigger {
+  display: none !important;
+}
+
+/* แสดงนาฬิกา */
+.header-clock {
+  display: block;
+}
+
+/* ปรับ Padding ของ Logo ใน Desktop */
+.logo-container {
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* --- Mobile (หน้าจอเล็กกว่า 768px) --- */
+@media (max-width: 768px) {
+  
+  /* ซ่อน Sidebar ตัวใหญ่ */
+  .desktop-sider {
+    display: none !important;
+  }
+
+  /* แสดงปุ่มเมนู 3 ขีด */
+  .mobile-menu-trigger {
+    display: flex !important;
+    font-size: 20px;
+    cursor: pointer;
+    margin-right: 15px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ซ่อนนาฬิกาเพราะที่มือถือไม่พอ */
+  .header-clock {
+    display: none;
+  }
+
+  /* ปรับ Padding Header ให้เล็กลง */
+  .site-header {
+    padding: 0 15px !important;
+  }
+  
+  /* ปรับขนาดตัวอักษร Title ให้เล็กลง */
+  .page-title {
+    font-size: 16px !important;
+  }
+
+  /* ปรับ Logo ใน Drawer (เมนูมือถือ) */
+  .drawer-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    border-bottom: 1px solid #f0f0f0;
+    margin-bottom: 10px;
+  }
+}

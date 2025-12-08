@@ -1,0 +1,177 @@
+/* AppResponsive.css - ออกแบบสำหรับ Mobile & Tablet */
+
+/* ==========================================================================
+   🎯 Global Layout & Typography
+   ========================================================================== */
+/* ลดขนาด Padding ของ Content ในมือถือ */
+@media (max-width: 768px) {
+  .ant-layout-content {
+    padding: 10px !important; /* ลดขอบให้เนื้อหาเต็มจอมากขึ้น */
+  }
+  
+  /* ปรับขนาดหัวข้อให้เล็กลง */
+  h1.ant-typography, .ant-typography h1,
+  h2.ant-typography, .ant-typography h2 {
+    font-size: 1.5rem !important;
+  }
+  
+  h3.ant-typography, .ant-typography h3,
+  h4.ant-typography, .ant-typography h4 {
+    font-size: 1.2rem !important;
+  }
+}
+
+/* ==========================================================================
+   💳 Cards (การ์ด)
+   ========================================================================== */
+/* ปรับแต่งการ์ดในมือถือให้ดูสะอาดตา */
+@media (max-width: 768px) {
+  .ant-card {
+    margin-bottom: 12px !important;
+    border-radius: 12px !important; /* มุมโค้งมนขึ้น */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important; /* เงาบางๆ */
+  }
+
+  .ant-card-head {
+    padding: 0 16px !important;
+    min-height: 48px !important;
+    font-size: 16px !important;
+  }
+
+  .ant-card-body {
+    padding: 16px !important; /* ลด Padding ภายใน */
+  }
+
+  /* สำหรับ Dashboard Statistic Cards ในมือถือ */
+  .ant-statistic-title {
+    font-size: 12px !important;
+  }
+  .ant-statistic-content-value {
+    font-size: 20px !important;
+  }
+}
+
+/* ==========================================================================
+   📅 Forms & Filters (ช่องกรอกข้อมูลและตัวกรอง)
+   ========================================================================== */
+@media (max-width: 992px) {
+  /* ทำให้ Form Layout เป็นแนวตั้งใน Tablet/Mobile เสมอ */
+  .ant-form-item {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .ant-form-item-label {
+    text-align: left !important;
+    padding-bottom: 4px !important;
+  }
+
+  /* ปุ่มและช่องกรอกข้อมูลในส่วน Header ของ Card (เช่น หน้า Report) */
+  .ant-card-body .ant-space {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+  }
+
+  .ant-picker, .ant-select, .ant-input-search {
+    width: 100% !important; /* ขยายเต็มจอ */
+    margin-bottom: 8px; /* เว้นระยะห่าง */
+  }
+  
+  /* ปุ่มค้นหาและปุ่ม Action ต่างๆ ขยายเต็ม */
+  .ant-btn {
+    width: 100%;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* ยกเว้นปุ่มในตาราง หรือปุ่มเล็กๆ */
+  .ant-table .ant-btn {
+    width: auto !important;
+    margin-bottom: 0;
+    display: inline-flex;
+  }
+}
+
+/* ==========================================================================
+   📊 Tables (ตาราง) - ปัญหาใหญ่สุดของ Mobile
+   ========================================================================== */
+@media (max-width: 1024px) {
+  /* ทำให้ตารางเลื่อนแนวนอนได้ (Horizontal Scroll) */
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch; /* ให้เลื่อนลื่นๆ บน iOS */
+  }
+
+  .ant-table {
+    white-space: nowrap; /* ห้ามตัดคำ ให้ตารางยาวออกไป */
+    min-width: 800px; /* บังคับความกว้างขั้นต่ำเพื่อให้ Scroll ทำงาน */
+  }
+
+  /* ปรับ Pagination ให้ย่อลง */
+  .ant-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .ant-pagination-item, .ant-pagination-prev, .ant-pagination-next {
+    margin-bottom: 8px !important;
+  }
+}
+
+/* ==========================================================================
+   🖼️ Modals (หน้าต่างเด้ง)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .ant-modal {
+    max-width: 100% !important;
+    width: 95% !important; /* ให้เกือบเต็มจอ */
+    margin: 10px auto !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .ant-modal-content {
+    border-radius: 12px !important;
+    padding: 16px !important;
+  }
+  
+  .ant-modal-header {
+    margin-bottom: 16px !important;
+  }
+  
+  /* ปุ่มใน Footer ของ Modal ให้เรียงแนวตั้งหรือเต็มจอ */
+  .ant-modal-footer {
+    display: flex;
+    flex-direction: column-reverse; /* เอาปุ่ม OK ไว้บน (หรือล่างตามสะดวก) */
+    gap: 8px;
+  }
+  
+  .ant-modal-footer .ant-btn {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+}
+
+/* ==========================================================================
+   👤 Profile Page Specific (หน้าโปรไฟล์)
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* รูปโปรไฟล์ให้อยู่ตรงกลาง */
+  .profile-pic-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  
+  /* จัดการ Avatar */
+  .ant-avatar {
+    width: 80px !important;
+    height: 80px !important;
+    line-height: 80px !important;
+  }
+  .ant-avatar-string {
+    font-size: 32px !important;
+  }
+}
