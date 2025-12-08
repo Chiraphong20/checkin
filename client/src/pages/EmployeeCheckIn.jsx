@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Select, Button, Card, Typography, message, Modal, Spin, Avatar, Tag, Row, Col, Divider, Alert } from "antd"; 
+import React, { useEffect, useState, useRef } from "react";
+import { Select, Button, Card, Typography, message, Modal, Spin, Avatar, Tag, Row, Col } from "antd"; 
 import { 
   ScanOutlined, 
   UserOutlined, 
@@ -35,10 +35,7 @@ export default function EmployeeCheckIn() {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [lineProfile, setLineProfile] = useState(null);
   const [firstTime, setFirstTime] = useState(false);
-  
-  // ✅ เปลี่ยนชื่อเป็น 'scanning' เพื่อให้เข้ากับ Logic การแก้ไข
-  const [scanning, setScanning] = useState(false); 
-  
+  const [scanning, setScanning] = useState(false);
   const [todayCheckin, setTodayCheckin] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
@@ -54,7 +51,7 @@ export default function EmployeeCheckIn() {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState("");
 
-  const qrRef = useRef(null); // ไม่ได้ใช้แล้วแต่เก็บไว้
+  const qrRef = useRef(null);
   const html5QrCodeRef = useRef(null);
   const hasScannedRef = useRef(false);
   
@@ -115,7 +112,7 @@ export default function EmployeeCheckIn() {
     }
   };
 
-  // 1. Main Load Data (Same as original)
+  // 1. Main Load Data
   useEffect(() => {
     const startLiff = async () => {
       try {
@@ -199,11 +196,14 @@ export default function EmployeeCheckIn() {
     };
 
     startLiff();
-    // Cleanup เดิมที่จัดการกล้องจะถูกย้ายไปที่ useEffect ใหม่
-    return () => {};
+    return () => {
+        if(html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+            html5QrCodeRef.current.stop().catch(err => console.error(err));
+        }
+    };
   }, []);
 
-  // 2. Update Timer (Same as original)
+  // 2. Update Timer
   useEffect(() => {
     const timeInterval = setInterval(() => {
       const now = dayjs();
@@ -213,7 +213,7 @@ export default function EmployeeCheckIn() {
     return () => clearInterval(timeInterval);
   }, []);
 
-  // 3. Sync Data (Same as original)
+  // 3. Sync Data
   useEffect(() => {
     const dataInterval = setInterval(() => {
       if (selectedEmployee && !firstTime && globalSettings) {
@@ -223,511 +223,552 @@ export default function EmployeeCheckIn() {
     return () => clearInterval(dataInterval);
   }, [selectedEmployee, firstTime, globalSettings]); 
 
-  // -------------------------------------------------------------------------
-  // 📷 ส่วนจัดการกล้อง (แก้ไข Race Condition ด้วย setTimeout 300ms)
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    let html5QrCode;
-
-    // ถ้ากดเปิดสแกน (scanning: true)
-    if (scanning) {
-      // ✅ เพิ่ม setTimeout รอให้ Modal แสดงผลเสร็จก่อน 300ms
-      const timer = setTimeout(() => {
-        const readerId = "reader";
-        
-        // ต้องแน่ใจว่า Element ถูก Render แล้ว
-        if (!document.getElementById(readerId)) {
-            console.error("Element 'reader' not found");
-            setScanning(false);
-            return;
-        }
-
-        html5QrCode = new Html5Qrcode(readerId);
-        html5QrCodeRef.current = html5QrCode; // เก็บ reference ไว้ใช้ใน cleanup
-
-        const config = { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0 
-        };
-
-        html5QrCode.start(
-          { facingMode: "environment" }, // ใช้กล้องหลัง
-          config,
-          (decodedText) => {
-            // เมื่อสแกนเจอ
-            if (hasScannedRef.current) return;
-            hasScannedRef.current = true; // ป้องกันการสแกนซ้ำ
-
-            // เรียกใช้ Logic การบันทึก
-            handleScanSuccess(decodedText); 
-            
-            // ปิดกล้องทันทีที่เจอ
-            html5QrCode.stop().then(() => {
-                html5QrCode.clear();
-            }).catch(err => console.error(err));
-            
-            setScanning(false);
-          },
-          (errorMessage) => {
-            // console.log(errorMessage); // ปิด log error รกๆ
-          }
-        ).catch((err) => {
-          console.error("Error starting scanner:", err);
-          message.error("ไม่สามารถเริ่มกล้องได้ กรุณาอนุญาตการใช้กล้อง");
-          setScanning(false);
-        });
-      }, 300); // <-- รอ 0.3 วินาที
-
-      // Cleanup ของ Timer
-      return () => clearTimeout(timer);
-    }
-    
-    // Cleanup Function เมื่อปิด Modal หรือ Component ถูกทำลาย
-    return () => {
-      // ใช้ html5QrCodeRef.current ที่เก็บไว้ใน start()
-      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-        html5QrCodeRef.current.stop().then(() => {
-            html5QrCodeRef.current.clear();
-        }).catch((err) => console.error("Error stopping scanner:", err));
-        html5QrCodeRef.current = null;
-      }
-    };
-  }, [scanning, selectedEmployee, branchDataMap, globalSettings, lineProfile]); 
-  // -------------------------------------------------------------------------
-
-  // --- 🔥 Logic ใหม่: คำนวณกะและสถานะ (ใช้ Placeholder เพื่อความสมบูรณ์) ---
+  // --- 🔥 Logic ใหม่: คำนวณกะและสถานะ ---
   const calculateShiftAndStatus = (currentMinutes, branchConfig) => {
-      // **(ใส่ Logic คำนวณกะและสถานะของคุณที่นี่)**
-      // Placeholder logic
-      const now = dayjs();
-      const time = now.format("HH:mm");
+      // 1. ระบุกะ: ถ้ามีกะ 2 ให้ดูว่าเวลาปัจจุบันใกล้ Start Time กะไหนมากกว่ากัน
+      let currentShift = 1;
+      
+      if (branchConfig.hasShift2) {
+          const diff1 = Math.abs(currentMinutes - branchConfig.shift1_start);
+          const diff2 = Math.abs(currentMinutes - branchConfig.shift2_start);
+          // ถ้าใกล้กะ 2 มากกว่า หรือเลยเวลากะ 1 มาไกลมากแล้ว (สมมติเกิน 4 ชม. จากกะ 1 ให้เช็คกะ 2)
+          if (diff2 < diff1) currentShift = 2;
+      }
+
+      // 2. ดึงเกณฑ์เวลาของกะที่เลือก
+      const start = currentShift === 1 ? branchConfig.shift1_start : branchConfig.shift2_start;
+      const lateAfter = currentShift === 1 ? branchConfig.shift1_late : branchConfig.shift2_late;
+      const t1 = currentShift === 1 ? branchConfig.shift1_t1 : branchConfig.shift2_t1;
+      const t2 = currentShift === 1 ? branchConfig.shift1_t2 : branchConfig.shift2_t2;
+
+      // 3. ดึงค่าปรับ Global
+      const { lateFine20, lateFine50, absentFine } = globalSettings || { lateFine20: 20, lateFine50: 50, absentFine: 50 };
+
+      // 4. คำนวณสถานะ
       let status = "มาปกติ";
-      if (currentMinutes > branchConfig.shift1_t2) status = "มาสาย (ระดับ 3)";
-      else if (currentMinutes > branchConfig.shift1_t1) status = "มาสาย (ระดับ 2)";
-      else if (currentMinutes > branchConfig.shift1_late) status = "มาสาย (ระดับ 1)";
+      let fine = 0;
 
-      return {
-          shift: "เช้า", // หรือ 'บ่าย' ตาม logic เดิม
-          status: status, 
-          fine: 0, 
-          lateAfter: branchConfig.shift1_late, 
-          t1: branchConfig.shift1_t1, 
-          t2: branchConfig.shift1_t2
-      }; 
+      if (currentMinutes <= lateAfter) { status = "มาปกติ"; fine = 0; }
+      else if (currentMinutes <= t1) { status = "มาสาย (ระดับ 1)"; fine = lateFine20; }
+      else if (currentMinutes <= t2) { status = "มาสาย (ระดับ 2)"; fine = lateFine50; }
+      else { status = "ขาดงาน/สายมาก"; fine = absentFine; }
+
+      return { shift: currentShift, status, fine, lateAfter, t1, t2 };
   };
-  
-  // --- 🔥 Logic Check-in / Check-out (ใช้ Placeholder เพื่อความสมบูรณ์) ---
 
-  // 4. Function handleScanSuccess
-  const handleScanSuccess = useCallback(async (decodedText) => {
-    // 1. ดึงชื่อสาขาจาก QR Code
-    let branchName = "";
-    try {
-        const url = new URL(decodedText);
-        branchName = decodeURIComponent(url.searchParams.get("branch") || "");
-    } catch (e) {
-        message.error("QR Code ไม่ถูกต้อง");
-        return;
-    }
-
-    if (!branchName) {
-        message.error("ไม่พบชื่อสาขาใน QR Code");
-        return;
-    }
-
-    // 2. ดึง config ของสาขา
+  const handleCheckIn = async (branchName, options = {}) => {
+    if (!selectedEmployee) throw new Error("กรุณาเลือกพนักงาน");
+    
+    // 1. ดึงข้อมูลสาขาที่สแกนเจอ
     const branchConfig = branchDataMap[normalizeBranch(branchName)];
+    
+    // ถ้าไม่มีข้อมูลสาขา ใช้ Default (หรือแจ้งเตือน)
     if (!branchConfig) {
-        message.error(`ไม่พบข้อมูลสาขา: ${branchName}`);
+        message.error("ไม่พบข้อมูลการตั้งค่าเวลาของสาขานี้");
         return;
     }
 
-    // 3. ดึง GPS ปัจจุบันและเช็คระยะ
-    let position = null;
-    let distance = -1;
-    let outsideArea = false;
-    let debugMessage = "";
-
-    try {
-        position = await getCurrentPosition();
-        const { latitude, longitude } = position.coords;
-        distance = haversineMeters(latitude, longitude, branchConfig.lat, branchConfig.lng);
-        
-        if (distance > globalSettings.radius) {
-            outsideArea = true;
-            debugMessage = `ระยะห่าง: ${distance.toFixed(2)} เมตร (เกิน ${globalSettings.radius} เมตร)`;
-            if (!globalSettings.allowOutside) {
-                // แสดง Modal นอกพื้นที่
-                setLastCheckInMessage(`❌ อยู่ห่างจากสาขาเกิน ${globalSettings.radius} เมตร\nระยะห่างจริง: ${distance.toFixed(2)} เมตร`);
-                setShowOutsideModal(true);
-                return;
-            }
-        }
-    } catch (e) {
-        message.warning("ไม่สามารถระบุตำแหน่งได้ อาจเกิดข้อผิดพลาด");
-        debugMessage = `GPS Error: ${e.message}`;
-    }
-
-    // 4. เตรียมข้อมูลลงเวลา
     const now = dayjs();
     const currentMinutes = now.hour() * 60 + now.minute();
     const formattedTimestamp = now.format("YYYY-MM-DD HH:mm:ss");
     const date = now.format("YYYY-MM-DD");
     const time = now.format("HH:mm");
 
-    // 5. คำนวณกะ สถานะ และค่าปรับ
+    // 2. คำนวณกะ และสถานะ (Logic ใหม่)
     let { shift, status, fine, lateAfter, t1, t2 } = calculateShiftAndStatus(currentMinutes, branchConfig);
-
-    // Override ถ้านอกพื้นที่แต่ได้รับอนุญาตให้เช็คอิน (OutsideAllowed)
-    if (outsideArea && globalSettings.allowOutside) {
-        status = `นอกพื้นที่ (${status})`;
-        fine = 0; // ไม่ปรับถ้านอกพื้นที่แต่ Admin อนุญาต
-    }
-
-    const isCheckedIn = todayCheckin && todayCheckin.checkinTime;
-    const isCheckedOut = todayCheckin && todayCheckin.checkoutTime && todayCheckin.checkoutTime !== "-";
     
-    try {
-        // --- 🔴 กรณี CHECK-IN ---
-        if (!isCheckedIn) {
-            const checkinData = {
-                employeeId: selectedEmployee.employeeId,
-                name: selectedEmployee.name,
-                branch: branchName,
-                date: date,
-                checkinTime: time,
-                checkinTimestamp: formattedTimestamp,
-                status: status,
-                fine: fine,
-                shift: shift,
-                lat: position ? position.coords.latitude.toFixed(6) : "N/A",
-                lng: position ? position.coords.longitude.toFixed(6) : "N/A",
-                distance: distance > 0 ? distance.toFixed(2) : "N/A",
-                checkoutTime: "-",
-                checkoutTimestamp: "-",
-                note: "",
-            };
-
-            const docRef = await addDoc(collection(db, "employee_checkin"), checkinData);
-            await checkTodayCheckin(selectedEmployee.employeeId); // อัพเดทสถานะ
-            
-            // แสดง Modal ตามสถานะ
-            if (status.includes("มาปกติ")) {
-                setLastCheckInMessage(`✅ เช็คอินสำเร็จ!\n${selectedEmployee.name}\nสาขา: ${branchName}\nเวลา: ${time}`);
-                setShowSuccessModal(true);
-            } else if (status.includes("มาสาย (ระดับ 1)")) {
-                setLastCheckInMessage(`⚠️ คุณมาสาย! ${globalSettings.lateFine20} บาท\nกำหนดเข้างาน: ${dayjs(lateAfter * 60000).format("HH:mm")}\nเวลาเช็คอิน: ${time}`);
-                setShowLateLevel1Modal(true);
-            } else if (status.includes("มาสาย (ระดับ 2)")) {
-                setLastCheckInMessage(`🚨 คุณมาสายมาก! ${globalSettings.lateFine50} บาท\nกำหนดเข้างาน: ${dayjs(t1 * 60000).format("HH:mm")}\nเวลาเช็คอิน: ${time}`);
-                setShowLateLevel2Modal(true);
-            } else { // ขาดงาน/สายมาก
-                setLastCheckInMessage(`❌ คุณมาสายเกินกว่าที่กำหนด\nเวลาเช็คอิน: ${time}\nระบบได้บันทึกเป็น ${status} (${fine} บาท) แล้ว`);
-                setShowLateLevel3Modal(true);
-            }
-
-        } 
-        // --- 🔵 กรณี CHECK-OUT ---
-        else if (isCheckedIn && !isCheckedOut) {
-            await handleCheckOutConfirmed(time, formattedTimestamp);
+    // Override ถ้านอกพื้นที่
+    if (options.outsideArea) { 
+        status = "นอกพื้นที่"; 
+        fine = 0; 
+        if (options.debugMessage) {
+            setLastCheckInMessage(`❌ อยู่นอกพื้นที่\n${options.debugMessage}`);
+        } else {
+            setLastCheckInMessage(`❌ อยู่นอกพื้นที่\nตรวจสอบ GPS หรือติดต่อผู้ดูแล`);
         }
-        
-    } catch (error) {
-        console.error("Error saving check-in/out", error);
-        message.error("การบันทึกข้อมูลล้มเหลว");
     }
-  }, [selectedEmployee, todayCheckin, branchDataMap, globalSettings, lineProfile, currentTimeMinutes]);
 
+    const isFirstTimeCheckIn = firstTime;
 
-  // 5. Function handleCheckOutConfirmed
-  const handleCheckOutConfirmed = async (checkoutTime, checkoutTimestamp) => {
-    if (!todayCheckin || todayCheckin.checkoutTime !== "-") return;
-    
     try {
-        const checkinRef = doc(db, "employee_checkin", todayCheckin.id);
-        await updateDoc(checkinRef, { checkoutTime, checkoutTimestamp });
+      if (firstTime) {
+        const employeeRef = doc(db, "employees", selectedEmployee.employeeId);
+        const existingBranches = Array.isArray(selectedEmployee.branches) ? selectedEmployee.branches : (selectedEmployee.branch ? [selectedEmployee.branch] : []);
+        const mergedBranches = Array.from(new Set([...existingBranches, branchName]));
+        const employeeData = { ...selectedEmployee, lineUserId: lineProfile.userId, branches: mergedBranches, branch: mergedBranches[0] };
+        delete employeeData.employeeId;
+        await setDoc(employeeRef, employeeData, { merge: true });
+        setFirstTime(false);
+      }
 
-        const msg = `✅ เช็คเอาท์สำเร็จ!\n${selectedEmployee.name}\nสาขา: ${todayCheckin.branch}\nเวลา: ${checkoutTime}`;
-        setCheckoutMessage(msg);
-        setTimeout(() => setShowCheckoutModal(true), 60);
-        await checkTodayCheckin(selectedEmployee.employeeId);
+      // 3. บันทึกข้อมูล (เพิ่ม field: shift)
+      await addDoc(collection(db, "employee_checkin"), {
+        employeeId: selectedEmployee.employeeId,
+        name: selectedEmployee.name,
+        phone: selectedEmployee.phone || "",
+        department: selectedEmployee.department || "",
+        branch: branchName,
+        shift: shift, // ✅ บันทึกว่าเข้ากะไหน
+        lineUserId: lineProfile.userId,
+        lineDisplayName: lineProfile.displayName || "",
+        lineProfileImage: lineProfile.pictureUrl || "",
+        date, checkinTime: time, checkoutTime: "-", timestamp: formattedTimestamp, status, fine,
+      });
+      
+      let messageForModal = `✅ เช็คอินสำเร็จ (กะ ${shift})!\nชื่อ: ${selectedEmployee.name}\nสาขา: ${branchName}\nเวลา: ${time}\nสถานะ: ${status}`;
+      
+      if (!options.outsideArea) {
+          setLastCheckInMessage(messageForModal);
+      }
+      
+      await checkTodayCheckin(selectedEmployee.employeeId);
+
+      if (isFirstTimeCheckIn) {
+        setFirstTimeCheckInMessage(messageForModal);
+        setTimeout(() => setShowFirstTimeModal(true), 60);
+      } else {
+        // 4. แสดง Modal ตามผลลัพธ์
+        if (options.outsideArea) {
+             setTimeout(() => setShowOutsideModal(true), 60);
+        }
+        else if (currentMinutes > lateAfter && currentMinutes <= t1) {
+             setTimeout(() => setShowLateLevel1Modal(true), 60);
+        }
+        else if (currentMinutes > t1 && currentMinutes <= t2) {
+             setTimeout(() => setShowLateLevel2Modal(true), 60);
+        }
+        else if (currentMinutes > t2) {
+             setTimeout(() => setShowLateLevel3Modal(true), 60);
+        }
+        else {
+             setTimeout(() => setShowSuccessModal(true), 60);
+        }
+      }
     } catch (error) {
-        console.error(error);
-        message.error("บันทึกเช็คเอาท์ไม่สำเร็จ");
+      console.error(error);
+      message.error("บันทึกไม่สำเร็จ");
     }
   };
 
+  const handleCheckOut = async () => {
+    if (!selectedEmployee || !todayCheckin) return message.error("ไม่พบข้อมูล");
+    const now = dayjs();
+    const currentMinutes = now.hour() * 60 + now.minute();
 
-  // 6. Function handleCheckOut (Trigger Scan)
-  const handleCheckOut = () => {
-    if (!todayCheckin || todayCheckin.checkoutTime !== "-") {
-        message.warning("คุณเช็คเอาท์ไปแล้ว");
-        return;
+    // 1. ตรวจสอบเวลาก่อนเช็คเอาท์ (ตามกะที่เช็คอินเข้ามา)
+    const branchConfig = branchDataMap[normalizeBranch(todayCheckin.branch)];
+    if (branchConfig) {
+        // ดึงเวลาเช็คเอาท์ขั้นต่ำตามกะที่ลงไว้ (ถ้าไม่มี shift ใน db ให้ถือเป็นกะ 1)
+        const currentShift = todayCheckin.shift || 1;
+        const minCheckout = currentShift === 2 ? branchConfig.shift2_out : branchConfig.shift1_out;
+        
+        // ถ้ายังไม่ถึงเวลาออกงาน (และไม่ได้นอกพื้นที่)
+        if (currentMinutes < minCheckout && !todayCheckin.status.includes("นอกพื้นที่")) {
+             const minTimeStr = `${Math.floor(minCheckout/60).toString().padStart(2,'0')}:${(minCheckout%60).toString().padStart(2,'0')}`;
+             message.warning(`ยังไม่ถึงเวลาเช็คเอาท์ (${minTimeStr} น.)`);
+             return; // ❌ ห้ามเช็คเอาท์ก่อนเวลา
+        }
     }
-    hasScannedRef.current = false;
-    setScanning(true);
-  };
-  
-  // 7. Function handleCheckIn (Trigger Scan)
-  const handleCheckIn = () => {
-    if (todayCheckin && todayCheckin.checkinTime) {
-        message.warning("คุณเช็คอินไปแล้ว");
-        return;
+
+    try {
+      const checkoutTime = now.format("HH:mm");
+      const checkoutTimestamp = now.format("YYYY-MM-DD HH:mm:ss");
+      const checkinRef = doc(db, "employee_checkin", todayCheckin.id);
+      await updateDoc(checkinRef, { checkoutTime, checkoutTimestamp });
+      const msg = `✅ เช็คเอาท์สำเร็จ!\n${selectedEmployee.name}\nสาขา: ${todayCheckin.branch}\nเวลา: ${checkoutTime}`;
+      setCheckoutMessage(msg);
+      setTimeout(() => setShowCheckoutModal(true), 60);
+      await checkTodayCheckin(selectedEmployee.employeeId);
+    } catch (error) {
+      console.error(error);
+      message.error("บันทึกเช็คเอาท์ไม่สำเร็จ");
     }
-    hasScannedRef.current = false;
-    setScanning(true);
   };
+
+  // ... (ฟังก์ชัน startQRScan และอื่นๆ คงเดิม Logic แต่เปลี่ยนการเรียกใช้) ...
+  const startQRScan = async () => {
+    if (!qrRef.current || !selectedEmployee || scanning || !html5QrCodeRef.current) return;
+    
+    setScanning(true);
+    hasScannedRef.current = false;
+
+    try {
+      await html5QrCodeRef.current.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        async (decodedText) => {
+          if (hasScannedRef.current) return;
+          hasScannedRef.current = true;
+          await stopScanner(); 
+
+          let branchName = "";
+          try {
+            const url = new URL(decodedText);
+            branchName = decodeURIComponent(url.searchParams.get("branch") || "").trim();
+            if (!branchName) throw new Error("No branch");
+          } catch (err) {
+            message.error("QR Code ไม่ถูกต้อง");
+            setScanning(false);
+            return;
+          }
+
+          let outsideArea = false;
+          let debugMessage = "";
+
+          // Check GPS with Branch Config from Map
+          const branchConfig = branchDataMap[normalizeBranch(branchName)];
+
+          if (branchConfig && branchConfig.lat && branchConfig.lng) {
+             try {
+                const pos = await getCurrentPosition();
+                const { latitude, longitude, accuracy } = pos.coords; 
+                
+                const dist = haversineMeters(latitude, longitude, branchConfig.lat, branchConfig.lng);
+                const adjustedDistance = Math.max(0, dist - accuracy);
+                const radius = globalSettings?.radius || 100;
+                
+                if (adjustedDistance > radius) {
+                    outsideArea = true; 
+                    debugMessage = `วัดได้: ${dist.toFixed(0)} ม. (รัศมี ${radius})\nGPS เพี้ยน: +/-${accuracy.toFixed(0)} ม.`;
+                }
+             } catch (e) { 
+                outsideArea = true; 
+                debugMessage = "จับสัญญาณ GPS ไม่ได้";
+             }
+          } else {
+             // ถ้าไม่เจอพิกัดสาขาในระบบ อาจจะให้ผ่าน หรือแจ้งเตือน (ในที่นี้ให้ผ่านแต่แจ้งเตือนว่าไม่เช็คพิกัด)
+             // outsideArea = true; debugMessage = "ไม่พบพิกัดสาขา"; 
+          }
+
+          const now = dayjs();
+          const nowTotalMinutes = now.hour() * 60 + now.minute();
+          
+          const isCheckedIn = !!(todayCheckin && todayCheckin.checkinTime && todayCheckin.checkinTime !== "-");
+          const isCheckedOut = !!(todayCheckin && todayCheckin.checkoutTime && todayCheckin.checkoutTime !== "-");
+          
+          // เช็คเวลาออกงาน (Logic ย้ายไป handleCheckOut)
+          // แค่เช็คว่ามีสิทธิ์กดปุ่มไหม
+          
+          try {
+            if (isCheckedIn && !isCheckedOut) {
+              await handleCheckOut(); 
+            } else if (!isCheckedIn) {
+               await handleCheckIn(branchName, { outsideArea, debugMessage }); 
+            } else {
+               message.info("วันนี้เช็คเอาท์เรียบร้อยแล้ว");
+            }
+          } catch (e) { 
+              console.error(e);
+              message.error("เกิดข้อผิดพลาดในการบันทึก"); 
+          }
+        },
+        (errorMessage) => {}
+      );
+    } catch (e) {
+      console.error(e);
+      setScanning(false);
+    }
+  };
+
+  const stopScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+        }
+      } catch (e) {}
+      setScanning(false);
+      hasScannedRef.current = false;
+    }
+  };
+
+  // Auto Start Scanner logic
+  useEffect(() => {
+    const qrElement = document.getElementById("qr-reader");
+    const isModalOpen = showSuccessModal || showLateLevel1Modal || showLateLevel2Modal || showLateLevel3Modal || showOutsideModal || showFirstTimeModal || showCheckoutModal;
+
+    if (globalSettings && lineProfile && dataLoaded && qrElement && selectedEmployee && !todayCheckin && !isModalOpen) {
+      if (!html5QrCodeRef.current) {
+        try {
+          html5QrCodeRef.current = new Html5Qrcode("qr-reader");
+        } catch (e) {
+          console.error("Error creating Html5Qrcode:", e);
+        }
+      }
+
+      if (html5QrCodeRef.current && !scanning) {
+         const timer = setTimeout(() => {
+             startQRScan();
+         }, 800);
+         return () => clearTimeout(timer);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalSettings, lineProfile, dataLoaded, selectedEmployee, todayCheckin, showSuccessModal, showLateLevel1Modal, showLateLevel2Modal, showLateLevel3Modal, showOutsideModal, showCheckoutModal]); 
+
 
   const handleSelect = (value) => {
     const emp = employees.find(e => e.employeeId === value);
     setSelectedEmployee(emp);
   };
 
-  const getStatusColor = (status) => {
-    if (status?.includes("ปกติ")) return "success";
-    if (status?.includes("ระดับ 1")) return "warning";
-    if (status?.includes("ระดับ 2")) return "volcano";
-    if (status?.includes("ขาดงาน") || status?.includes("นอกพื้นที่")) return "error";
-    return "default";
-  };
-  
-  const isCheckedIn = todayCheckin && todayCheckin.checkinTime;
-  const isCheckedOut = todayCheckin && todayCheckin.checkoutTime && todayCheckin.checkoutTime !== "-";
-  
   // Loading State
   if (!globalSettings || !lineProfile || !dataLoaded) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: '#f5f7fa' }}>
         <Spin size="large" />
-        <Text style={{ marginTop: 15 }}>กำลังโหลดข้อมูล...</Text>
+        <Text style={{ marginTop: 20, color: '#999' }}>กำลังโหลดข้อมูล...</Text>
       </div>
     );
   }
 
+  const isCheckedIn = !!(todayCheckin && todayCheckin.checkinTime && todayCheckin.checkinTime !== "-");
+  const isCheckedOut = !!(todayCheckin && todayCheckin.checkoutTime && todayCheckin.checkoutTime !== "-");
+  
+  // Logic ปุ่มกด
+  // ต้องเช็คเวลาออกงานของกะที่ลงไว้ด้วย
+  let isTimeToCheckOut = false;
+  if (isCheckedIn && todayCheckin) {
+      const branchConfig = branchDataMap[normalizeBranch(todayCheckin.branch)];
+      if (branchConfig) {
+          const currentShift = todayCheckin.shift || 1;
+          const minCheckout = currentShift === 2 ? branchConfig.shift2_out : branchConfig.shift1_out;
+          isTimeToCheckOut = currentTimeMinutes >= minCheckout;
+      } else {
+          isTimeToCheckOut = true; // Fallback
+      }
+  }
+
+  const getButtonText = () => {
+    if (firstTime) return "เลือกชื่อเพื่อเริ่มใช้งาน";
+    if (scanning) return "กำลังสแกน...";
+    if (isCheckedIn && !isCheckedOut && isTimeToCheckOut) return "สแกนเช็คเอาท์";
+    if (isCheckedIn && !isCheckedOut && !isTimeToCheckOut) return "ยังไม่ถึงเวลาออกงาน";
+    if (isCheckedOut) return "เช็คเอาท์แล้ว";
+    return "สแกนเช็คอิน";
+  }
+
+  const getStatusColor = (status) => {
+      if (!status) return 'default';
+      if (status.includes('ปกติ')) return 'success';
+      if (status.includes('สาย')) return 'warning';
+      if (status.includes('ขาด') || status.includes('พื้นที่')) return 'error';
+      return 'default';
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
-      {/* 🔴 Header/Status Bar */}
-      <div style={{ 
-          background: 'linear-gradient(135deg, #FF6539 0%, #FF9739 100%)', 
-          padding: '40px 20px 80px 20px', 
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+    <div style={{ minHeight: "100vh", background: "#f5f7fa", fontFamily: "'Sarabun', sans-serif" }}>
+      
+      {/* 🔹 Header Gradient */}
+      <div style={{
+        background: "linear-gradient(135deg, #FF6539 0%, #ff8e6f 100%)",
+        padding: "30px 20px 80px 20px",
+        borderBottomLeftRadius: 30,
+        borderBottomRightRadius: 30,
+        color: "white",
+        boxShadow: "0 4px 15px rgba(255, 101, 57, 0.3)"
       }}>
-        <Title level={4} style={{ color: '#fff', margin: 0 }}>
-          {dayjs().format("dddd")}
-        </Title>
-        <Title level={2} style={{ color: '#fff', margin: '5px 0 10px 0' }}>
-          {dayjs().format("D MMMM YYYY")}
-        </Title>
-        <Row gutter={16} style={{ marginTop: 20 }}>
-          <Col span={24}>
-            <div style={{ textAlign: 'center', background: "rgba(255,255,255,0.2)", padding: 10, borderRadius: 8 }}>
-              <Text strong style={{ color: "#fff", fontSize: 24 }}>
-                {currentTime.format("HH:mm:ss")}
-              </Text>
-              <Text style={{ display: 'block', color: "rgba(255,255,255,0.8)", fontSize: 12 }}>เวลาปัจจุบัน</Text>
-            </div>
-          </Col>
+        <Row justify="space-between" align="middle">
+            <Col>
+                <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 14 }}>{dayjs().format("dddd, D MMMM YYYY")}</Text>
+                <Title level={3} style={{ color: "white", margin: 0 }}>สวัสดี, {lineProfile.displayName.split(" ")[0]}</Title>
+            </Col>
+            <Col>
+                <div style={{ textAlign: "right" }}>
+                    <Title level={2} style={{ color: "white", margin: 0, fontWeight: 300 }}>{currentTime.format("HH:mm")}</Title>
+                    <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 12 }}>เวลาปัจจุบัน</Text>
+                </div>
+            </Col>
         </Row>
       </div>
 
       {/* 🔹 Main Content Area */}
       <div style={{ padding: "0 20px", marginTop: -60 }}>
+        
         {/* 1. Profile / Employee Selection Card */}
         <Card bordered={false} style={{ borderRadius: 20, boxShadow: "0 8px 20px rgba(0,0,0,0.08)", marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
-            <Avatar size={64} src={lineProfile.pictureUrl} icon={<UserOutlined />} style={{ border: "3px solid #FF6539", backgroundColor: "#fff", color: "#FF6539" }} />
-            <div style={{ flex: 1 }}>
-              {firstTime ? (
-                <>
-                  <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>กรุณาระบุตัวตนครั้งแรก</Text>
-                  <Select 
-                    showSearch 
-                    placeholder="ค้นหาชื่อของคุณ" 
-                    onChange={handleSelect} 
-                    value={selectedEmployee?.employeeId} 
-                    style={{ width: '100%', marginTop: 5 }} 
-                    size="large"
-                    disabled={!dataLoaded}
-                  >
-                    {employees.map(emp => (
-                      <Option key={emp.employeeId} value={emp.employeeId}>
-                        {emp.name} ({emp.employeeId})
-                      </Option>
-                    ))}
-                  </Select>
-                  {selectedEmployee && <Button type="primary" onClick={() => handleScanSuccess("https://example.com/checkin?branch=สาขาหลัก")} style={{ marginTop: 10 }}>ยืนยันตัวตน</Button>}
-                </>
-              ) : (
-                <>
-                  <Title level={4} style={{ margin: 0 }}>
-                    {selectedEmployee?.name}
-                  </Title>
-                  <Text type="secondary" style={{ display: 'block' }}>
-                    {selectedEmployee?.employeeId} | {selectedEmployee?.branch || "ไม่ระบุสาขา"}
-                  </Text>
-                  {todayCheckin && todayCheckin.fine > 0 && (
-                      <Tag color="error" style={{ marginTop: 5 }}>ปรับ: {todayCheckin.fine} บาท</Tag>
-                  )}
-                </>
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+                <Avatar 
+                    size={64} 
+                    src={lineProfile.pictureUrl} 
+                    icon={<UserOutlined />} 
+                    style={{ border: "3px solid #FF6539", backgroundColor: "#fff", color: "#FF6539" }}
+                />
+                <div style={{ flex: 1 }}>
+                    {firstTime ? (
+                        <>
+                            <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>กรุณาระบุตัวตนครั้งแรก</Text>
+                            <Select 
+                                showSearch
+                                placeholder="ค้นหาชื่อของคุณ" 
+                                onChange={handleSelect} 
+                                value={selectedEmployee?.employeeId}
+                                style={{ width: '100%', marginTop: 5 }}
+                                size="large"
+                                filterOption={(input, option) => 
+                                    (option?.children ?? '').toLowerCase().includes(input.toLowerCase())
+                                }
+                            >
+                                {employees.map((emp) => (
+                                    <Option key={emp.employeeId} value={emp.employeeId}>{emp.name}</Option>
+                                ))}
+                            </Select>
+                        </>
+                    ) : (
+                        <>
+                            <Title level={5} style={{ margin: 0, color: "#333" }}>{selectedEmployee?.name || "พนักงาน"}</Title>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                                <Text type="secondary" style={{ fontSize: 13 }}>
+                                    <EnvironmentOutlined /> {selectedEmployee?.branch || "ไม่ระบุสาขา"}
+                                </Text>
+                                {/* แสดงกะที่กำลังทำงาน */}
+                                {isCheckedIn && <Tag color="blue" icon={<FieldTimeOutlined />}>กะ {todayCheckin.shift || 1}</Tag>}
+                            </div>
+                            <div style={{ marginTop: 4 }}>
+                                <Tag color="orange">รหัส: {selectedEmployee?.employeeId}</Tag>
+                            </div>
+                        </>
+                    )}
+                </div>
             </div>
-          </div>
         </Card>
-
-        {/* 2. Check-in/Check-out Status */}
-        {!firstTime && selectedEmployee && (
-          <Row gutter={16}>
-            <Col span={12}>
-              <Card size="small" style={{ backgroundColor: isCheckedIn ? "#f6ffed" : "#f5f5f5", borderColor: isCheckedIn ? "#b7eb8f" : "#f0f0f0" }}>
-                <div style={{ textAlign: "center" }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>เวลาเข้างาน</Text>
-                  <div style={{ fontSize: 20, fontWeight: "bold", color: isCheckedIn ? "#389e0d" : "#bfbfbf", marginTop: 5 }}>
-                    {todayCheckin?.checkinTime || "--:--"}
-                  </div>
-                  {isCheckedIn && <Tag color={getStatusColor(todayCheckin?.status)} style={{ marginTop: 5 }}>{todayCheckin?.status}</Tag>}
-                </div>
-              </Card>
-            </Col>
-            <Col span={12}>
-              <Card size="small" style={{ backgroundColor: isCheckedOut ? "#e6f7ff" : "#f5f5f5", borderColor: isCheckedOut ? "#91d5ff" : "#f0f0f0" }}>
-                <div style={{ textAlign: "center" }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>เวลาออกงาน</Text>
-                  <div style={{ fontSize: 20, fontWeight: "bold", color: isCheckedOut ? "#096dd9" : "#bfbfbf", marginTop: 5 }}>
-                    {todayCheckin?.checkoutTime && todayCheckin.checkoutTime !== "-" ? todayCheckin.checkoutTime : "--:--"}
-                  </div>
-                  {isCheckedOut && <Tag color="blue" style={{ marginTop: 5 }}>เช็คเอาท์แล้ว</Tag>}
-                </div>
-              </Card>
-            </Col>
-          </Row>
-        )}
-
-        {/* 3. Action Buttons */}
-        {!firstTime && selectedEmployee && (
-          <div style={{ marginTop: 20 }}>
-            {/* Check-in Button */}
-            <Button
-              type="primary"
-              size="large"
-              block
-              icon={<ScanOutlined />}
-              onClick={handleCheckIn}
-              disabled={isCheckedIn || scanning}
-              loading={scanning && !isCheckedIn}
-              style={{ marginBottom: 10, borderRadius: 10, height: 50, background: isCheckedIn ? "#52c41a" : "#FF6539", borderColor: isCheckedIn ? "#52c41a" : "#FF6539" }}
-            >
-              {isCheckedIn ? "เช็คอินแล้ววันนี้" : "ลงเวลาเข้างาน (สแกน QR)"}
-            </Button>
-
-            {/* Check-out Button */}
-            <Button
-              type="default"
-              size="large"
-              block
-              icon={<LogoutOutlined />}
-              onClick={handleCheckOut}
-              disabled={!isCheckedIn || isCheckedOut || scanning}
-              loading={scanning && isCheckedIn}
-              style={{ borderRadius: 10, height: 50, color: isCheckedOut ? "#bfbfbf" : "#000" }}
-            >
-              {isCheckedOut ? "เช็คเอาท์แล้ว" : "ลงเวลาออกงาน (สแกน QR)"}
-            </Button>
+        
+        {/* 3. Action Button (Scanner) */}
+        <div style={{ marginBottom: 30 }}>
+            <div id="qr-reader" ref={qrRef} style={{ width: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: scanning ? 20 : 0, display: scanning ? 'block' : 'none' }} />
             
-            <Alert
-              message="คำแนะนำ"
-              description="ในการสแกน QR Code คุณต้องอยู่ภายในรัศมีของสาขา"
-              type="info"
-              showIcon
-              style={{ marginTop: 20, borderRadius: 10 }}
-            />
-          </div>
+            <Button 
+                type="primary" 
+                block 
+                size="large" 
+                disabled={(firstTime && !selectedEmployee) || isCheckedOut || (isCheckedIn && !isTimeToCheckOut)}
+                onClick={startQRScan}
+                loading={scanning}
+                icon={!scanning && <ScanOutlined style={{ fontSize: 24 }} />}
+                style={{ 
+                    height: 60, 
+                    borderRadius: 15, 
+                    fontSize: 18, 
+                    fontWeight: "bold",
+                    background: isCheckedOut ? "#d9d9d9" : "linear-gradient(90deg, #FF6539 0%, #ff8e6f 100%)",
+                    borderColor: "transparent",
+                    boxShadow: isCheckedOut ? "none" : "0 10px 20px rgba(255, 101, 57, 0.3)",
+                    marginTop: 10
+                }}
+            >
+                {getButtonText()}
+            </Button>
+
+            {!firstTime && !isCheckedOut && !scanning && isCheckedIn && !isTimeToCheckOut && (
+                <div style={{ textAlign: 'center', marginTop: 15 }}>
+                    <Text type="secondary" style={{ fontSize: 12, color: '#faad14' }}>
+                        <ClockCircleOutlined /> ยังไม่ถึงเวลาออกงาน (รอเวลาเช็คเอาท์)
+                    </Text>
+                </div>
+            )}
+        </div>
+
+        {/* 2. Today's Status Timeline */}
+        {!firstTime && (
+            <Card title="สถานะวันนี้" bordered={false} style={{ borderRadius: 20, boxShadow: "0 4px 15px rgba(0,0,0,0.05)", marginBottom: 20 }}>
+                <Row gutter={[16, 16]}>
+                    <Col span={12}>
+                        <Card size="small" style={{ backgroundColor: isCheckedIn ? "#f6ffed" : "#f5f5f5", borderColor: isCheckedIn ? "#b7eb8f" : "#f0f0f0" }}>
+                            <div style={{ textAlign: "center" }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>เวลาเข้างาน</Text>
+                                <div style={{ fontSize: 20, fontWeight: "bold", color: isCheckedIn ? "#389e0d" : "#bfbfbf", marginTop: 5 }}>
+                                    {todayCheckin?.checkinTime || "--:--"}
+                                </div>
+                                {isCheckedIn && <Tag color={getStatusColor(todayCheckin?.status)} style={{ marginTop: 5 }}>{todayCheckin?.status}</Tag>}
+                            </div>
+                        </Card>
+                    </Col>
+                    <Col span={12}>
+                        <Card size="small" style={{ backgroundColor: isCheckedOut ? "#e6f7ff" : "#f5f5f5", borderColor: isCheckedOut ? "#91d5ff" : "#f0f0f0" }}>
+                            <div style={{ textAlign: "center" }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>เวลาออกงาน</Text>
+                                <div style={{ fontSize: 20, fontWeight: "bold", color: isCheckedOut ? "#096dd9" : "#bfbfbf", marginTop: 5 }}>
+                                    {todayCheckin?.checkoutTime && todayCheckin.checkoutTime !== "-" ? todayCheckin.checkoutTime : "--:--"}
+                                </div>
+                                {isCheckedOut && <Tag color="blue" style={{ marginTop: 5 }}>สำเร็จ</Tag>}
+                            </div>
+                        </Card>
+                    </Col>
+                </Row>
+            </Card>
         )}
+
+        {/* 4. Logout / Close */}
+        <div style={{ textAlign: 'center', paddingBottom: 40 }}>
+            <Button type="text" icon={<CloseCircleFilled />} onClick={() => window.liff?.closeWindow?.()} style={{ color: "#999" }}>
+                ปิดหน้าต่าง
+            </Button>
+        </div>
+
       </div>
 
-      {/* --- ✅ Modal สแกน QR (แก้ไข ID เป็น 'reader') --- */}
-      <Modal 
-        open={scanning} 
-        title="สแกน QR Code เพื่อลงเวลา"
-        onCancel={() => setScanning(false)}
-        footer={null}
-        centered
-        maskClosable={false}
-        destroyOnClose={true} // สำคัญ: ทำลาย DOM เพื่อให้ useEffect สร้างใหม่ได้
-      >
-        <div 
-          id="reader" 
-          style={{ 
-            width: "100%", 
-            maxWidth: 400, 
-            margin: "10px auto", 
-            border: "1px solid #FF6539",
-            borderRadius: 8
-          }} 
-        />
-        <p style={{ textAlign: 'center', marginTop: 10, color: '#8c8c8c' }}>
-          นำ QR Code สาขาให้อยู่ในกรอบ
-        </p>
-      </Modal>
-
-      {/* --- Modal เช็คอินสำเร็จ --- */}
+      {/* --- Modal เช็คอินทันเวลา --- */}
       <Modal open={showSuccessModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <CheckCircleFilled style={{ fontSize: 60, color: '#52c41a', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#52c41a' }}>เช็คอินสำเร็จ</Title>
+         <Title level={4} style={{ color: '#52c41a' }}>สุดยอด! มาทันเวลา</Title>
+         <img src="/ontime.gif" alt="On time" style={{ width: 200, marginBottom: 20 }} />
          <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #b7eb8f' }}>
-             <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
+            <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" block size="large" onClick={()=>setShowSuccessModal(false)} style={{ borderRadius: 10 }}>ปิด</Button>
+         <Button type="primary" block size="large" onClick={()=>setShowSuccessModal(false)} style={{ borderRadius: 10, background: '#52c41a' }}>ตกลง</Button>
       </Modal>
 
-      {/* --- Modal มาสาย Level 1 --- */}
+      {/* --- Modal เช็คเอาท์ --- */}
+      <Modal open={showCheckoutModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
+         <LogoutOutlined style={{ fontSize: 60, color: '#1890ff', marginBottom: 20 }} />
+         <Title level={4}>เช็คเอาท์สำเร็จ</Title>
+         <div style={{ background: '#e6f7ff', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #91d5ff' }}>
+            <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{checkoutMessage}</pre>
+         </div>
+         <Button type="primary" block size="large" onClick={()=>setShowCheckoutModal(false)} style={{ borderRadius: 10 }}>ตกลง</Button>
+      </Modal>
+
+      {/* --- Modal นอกพื้นที่ --- */}
+      <Modal open={showOutsideModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
+         <EnvironmentOutlined style={{ fontSize: 60, color: '#faad14', marginBottom: 20 }} />
+         <Title level={4} style={{ color: '#faad14' }}>อยู่นอกพื้นที่!</Title>
+         <div style={{ background: '#fffbe6', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffe58f' }}>
+            <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
+         </div>
+         <Button type="primary" danger block size="large" onClick={()=>setShowOutsideModal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+      </Modal>
+
+      {/* --- Modal ระดับ 1: มาสายเล็กน้อย --- */}
       <Modal open={showLateLevel1Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
          <ClockCircleOutlined style={{ fontSize: 60, color: '#faad14', marginBottom: 20 }} />
          <Title level={4} style={{ color: '#faad14' }}>มาให้ไวกว่านี้นะ</Title>
          <div style={{ background: '#fffbe6', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffe58f' }}>
              <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" block size="large" onClick={()=>setShowLateLevel1Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+         <Button type="primary" style={{ background: '#faad14', borderColor: '#faad14', borderRadius: 10 }} block size="large" onClick={()=>setShowLateLevel1Modal(false)}>รับทราบ</Button>
       </Modal>
 
-      {/* --- Modal มาสาย Level 2 --- */}
+      {/* --- Modal ระดับ 2: สายปานกลาง --- */}
       <Modal open={showLateLevel2Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
-         <FieldTimeOutlined style={{ fontSize: 60, color: '#ff7a45', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#ff7a45' }}>สายมากแล้ว! กรุณาเข้างาน</Title>
+         <div style={{ fontSize: 60, marginBottom: 20 }}>🏃💨</div>
+         <Title level={3} style={{ color: '#fa541c' }}>วิ่งงงงงงงง</Title>
          <div style={{ background: '#fff2e8', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffbb96' }}>
              <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" block size="large" onClick={()=>setShowLateLevel2Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
+         <Button type="primary" danger block size="large" onClick={()=>setShowLateLevel2Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
       </Modal>
 
-      {/* --- Modal มาสาย Level 3 / ขาดงาน --- */}
-      <Modal open={showLateLevel3Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
-         <CloseCircleFilled style={{ fontSize: 60, color: '#ff4d4f', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#ff4d4f' }}>วันนี้มาสายเกินไปแล้วนะ</Title>
-         <div style={{ background: '#fff1f0', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #ffa39e' }}>
+      {/* --- Modal ระดับ 3: สายมาก/ขาดงาน --- */}
+      <Modal open={showLateLevel3Modal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 0 }}>
+         <CloseCircleFilled style={{ fontSize: 60, color: '#cf1322', marginBottom: 20, marginTop: 30 }} />
+         <Title level={4} style={{ color: '#cf1322', padding: '0 20px' }}>สายแล้วนะ! กลับบ้านไปนอนเลยนะ</Title>
+         <img src="/sleep.jpg" alt="Go to sleep" style={{ width: '100%', maxWidth: 300, marginBottom: 20, marginTop: 10, borderRadius: 8 }} />
+         <div style={{ background: '#fff1f0', padding: 15, borderRadius: 10, margin: '0 20px 20px 20px', border: '1px solid #ffa39e' }}>
              <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
          </div>
-         <Button type="primary" danger block size="large" onClick={()=>setShowLateLevel3Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
-      </Modal>
-
-      {/* --- Modal นอกพื้นที่ --- */}
-      <Modal open={showOutsideModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
-        <EnvironmentOutlined style={{ fontSize: 60, color: '#1890ff', marginBottom: 20 }} />
-        <Title level={4} style={{ color: '#1890ff' }}>คุณอยู่นอกพื้นที่เช็คอิน</Title>
-        <div style={{ background: '#e6f7ff', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #91d5ff' }}>
-            <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{lastCheckInMessage}</pre>
-        </div>
-        <Button type="primary" block size="large" onClick={()=>setShowOutsideModal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
-      </Modal>
-      
-      {/* --- Modal เช็คเอาท์สำเร็จ --- */}
-      <Modal open={showCheckoutModal} centered footer={null} closable={false} bodyStyle={{ textAlign: 'center', padding: 30 }}>
-         <LogoutOutlined style={{ fontSize: 60, color: '#096dd9', marginBottom: 20 }} />
-         <Title level={4} style={{ color: '#096dd9' }}>เช็คเอาท์เรียบร้อย</Title>
-         <div style={{ background: '#e6f7ff', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #91d5ff' }}>
-             <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{checkoutMessage}</pre>
+         <div style={{ padding: '0 20px 30px 20px' }}>
+            <Button type="primary" danger block size="large" onClick={()=>setShowLateLevel3Modal(false)} style={{ borderRadius: 10 }}>รับทราบ</Button>
          </div>
-         <Button type="primary" block size="large" onClick={()=>setShowCheckoutModal(false)} style={{ borderRadius: 10 }}>ปิด</Button>
       </Modal>
 
       {/* --- Modal ยินดีต้อนรับ (ครั้งแรก) --- */}
@@ -735,9 +776,9 @@ export default function EmployeeCheckIn() {
          <CheckCircleFilled style={{ fontSize: 60, color: '#52c41a', marginBottom: 20 }} />
          <Title level={4} style={{ marginTop: 10 }}>ยินดีต้อนรับ</Title>
          <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0', border: '1px solid #b7eb8f' }}>
-             <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{firstTimeCheckInMessage}</pre>
+            <pre style={{ margin: 0, fontFamily: 'Sarabun', whiteSpace: 'pre-wrap', color: '#333' }}>{firstTimeCheckInMessage}</pre>
          </div>
-         <Button type="primary" block size="large" onClick={()=>setShowFirstTimeModal(false)} style={{ borderRadius: 10 }}>เริ่มต้นใช้งาน</Button>
+         <Button type="primary" block size="large" onClick={()=>setShowFirstTimeModal(false)} style={{ borderRadius: 10, background: '#52c41a' }}>เริ่มใช้งาน</Button>
       </Modal>
 
     </div>
