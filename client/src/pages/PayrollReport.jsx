@@ -100,91 +100,112 @@ const PayrollReport = () => {
     return false;
   };
 
-  // Fetch รายงาน
-  const fetchReport = async () => {
-    setLoading(true);
-    setError(null);
-    setCurrentPage(1); 
-    try {
-      const [start, end] = dateRange;
-      const q = query(
-        collection(db, 'employee_checkin'),
-        where('date', '>=', start.format('YYYY-MM-DD')),
-        where('date', '<=', end.format('YYYY-MM-DD')),
-        orderBy('date', 'asc')
-      );
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => doc.data());
+ // แก้ไขฟังก์ชัน fetchReport
+const fetchReport = async () => {
+  setLoading(true);
+  setError(null);
+  setCurrentPage(1);
+  try {
+    const [start, end] = dateRange;
 
-      const summary = {};
-      data.forEach(entry => {
-        const { employeeId, name, branch, date, checkinTime, status } = entry;
-        
-        // Initialize employee object if not exists
-        const emp = summary[employeeId] || {
-          employeeId, 
-          name, 
-          branch, 
-          lateCount: 0, 
-          leaveCount: 0, 
-          absentCount: 0, // 🔹 เพิ่มตัวนับขาดงาน
-          totalDeduction: 0, 
-          details: []
-        };
+    // 1️⃣ ดึงรายชื่อพนักงานทั้งหมดมาก่อน (Master List)
+    // สมมติว่า collection ชื่อ "employees" (เช็คชื่อใน Firebase ของคุณด้วยนะครับ)
+    const employeesSnap = await getDocs(collection(db, 'employees'));
+    const allEmployees = employeesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        let fine = 0;
-        let type = "";
+    // 2️⃣ ดึงข้อมูลการลงเวลา (Check-in Data)
+    const q = query(
+      collection(db, 'employee_checkin'),
+      where('date', '>=', start.format('YYYY-MM-DD')),
+      where('date', '<=', end.format('YYYY-MM-DD')),
+      orderBy('date', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    const checkinData = snapshot.docs.map(doc => doc.data());
 
-        // ----------------------------------------------------
-        // 🔹 Logic ใหม่: ตรวจสอบ "ขาดงาน" ก่อน
-        // ----------------------------------------------------
-        if (status === 'ขาดงาน' || checkinTime === '-' || !checkinTime) {
-            // กรณีเป็น record ที่บันทึกว่าขาดงาน
-            fine = entry.fine ? Number(entry.fine) : 50; // ใช้ค่าปรับจาก DB หรือ Default 50
-            type = "ขาดงาน";
-            emp.absentCount += 1;
-        } 
-        else {
-            // กรณีมีการเช็คอินปกติ นำมาคำนวณสาย
-            const checkin = dayjs(`${date} ${checkinTime}`, "YYYY-MM-DD HH:mm");
-            const graceEnd = dayjs(`${date} 08:05`, "YYYY-MM-DD HH:mm");
-            const late20End = dayjs(`${date} 08:15`, "YYYY-MM-DD HH:mm");
-            const late50End = dayjs(`${date} 08:30`, "YYYY-MM-DD HH:mm");
+    const summary = {};
 
-            if (checkin.isValid()) {
-                if (checkin.isAfter(graceEnd) && checkin.isSameOrBefore(late20End)) {
-                    fine = 20;
-                    type = "มาสาย (20 บาท)";
-                    emp.lateCount += 1;
-                } else if (checkin.isAfter(late20End) && checkin.isSameOrBefore(late50End)) {
-                    fine = 50;
-                    type = "มาสาย (50 บาท)";
-                    emp.lateCount += 1;
-                } else if (checkin.isAfter(late50End)) {
-                    fine = 50;
-                    type = "หยุด (50 บาท)";
-                    emp.leaveCount += 1; // เกิน 8:30 นับเป็นลา
-                }
-            }
-        }
+    // 3️⃣ สร้างโครงข้อมูลเริ่มต้นจากพนักงานทุกคน (แม้จะไม่มีการลงเวลาก็ตาม)
+    allEmployees.forEach(emp => {
+      // ตรวจสอบ key ให้ตรงกับใน Database (เช่น emp.employeeId หรือ emp.id)
+      const empId = emp.employeeId || emp.id; 
+      
+      summary[empId] = {
+        employeeId: empId,
+        name: emp.name,
+        branch: emp.branch || '-', // ใช้สาขาจาก Master เป็นหลัก
+        lateCount: 0,
+        leaveCount: 0,
+        absentCount: 0,
+        totalDeduction: 0,
+        details: []
+      };
+    });
 
-        // ถ้ามีค่าปรับ ให้บันทึกลง details
-        if (fine > 0) {
-          emp.details.push({ date, checkinTime, branch, fine, type });
-        }
+    // 4️⃣ วนลูปข้อมูล Check-in เพื่อคำนวณยอด
+    checkinData.forEach(entry => {
+      const { employeeId, date, checkinTime, status, branch } = entry;
+      
+      // ถ้าไม่มีใน Master (เช่น พนักงานเก่าที่ออกไปแล้ว) อาจจะข้าม หรือสร้างใหม่
+      // ในที่นี้ถ้าไม่มี ให้สร้าง Object ใหม่กัน error
+      if (!summary[employeeId]) {
+         summary[employeeId] = {
+            employeeId,
+            name: entry.name, // ใช้ชื่อจาก Transaction
+            branch: branch || '-',
+            lateCount: 0, leaveCount: 0, absentCount: 0, totalDeduction: 0, details: []
+         };
+      }
 
-        emp.totalDeduction += fine;
-        summary[employeeId] = emp;
-      });
+      const emp = summary[employeeId];
+      
+      // ... (Logic การคำนวณเงินเหมือนเดิม) ...
+      let fine = 0;
+      let type = "";
 
-      setReportData(Object.values(summary));
-    } catch (err) {
-      console.error(err);
-      setError('ไม่สามารถดึงข้อมูลได้จาก Firebase');
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (status === 'ขาดงาน' || checkinTime === '-' || !checkinTime) {
+          fine = entry.fine ? Number(entry.fine) : 50;
+          type = "ขาดงาน";
+          emp.absentCount += 1;
+      } 
+      else {
+          const checkin = dayjs(`${date} ${checkinTime}`, "YYYY-MM-DD HH:mm");
+          const graceEnd = dayjs(`${date} 08:05`, "YYYY-MM-DD HH:mm");
+          const late20End = dayjs(`${date} 08:15`, "YYYY-MM-DD HH:mm");
+          const late50End = dayjs(`${date} 08:30`, "YYYY-MM-DD HH:mm");
+
+          if (checkin.isValid()) {
+              if (checkin.isAfter(graceEnd) && checkin.isSameOrBefore(late20End)) {
+                  fine = 20;
+                  type = "มาสาย (20 บาท)";
+                  emp.lateCount += 1;
+              } else if (checkin.isAfter(late20End) && checkin.isSameOrBefore(late50End)) {
+                  fine = 50;
+                  type = "มาสาย (50 บาท)";
+                  emp.lateCount += 1;
+              } else if (checkin.isAfter(late50End)) {
+                  fine = 50;
+                  type = "หยุด (50 บาท)";
+                  emp.leaveCount += 1;
+              }
+          }
+      }
+
+      if (fine > 0) {
+        emp.details.push({ date, checkinTime, branch: branch || emp.branch, fine, type });
+      }
+
+      emp.totalDeduction += fine;
+    });
+
+    setReportData(Object.values(summary));
+  } catch (err) {
+    console.error(err);
+    setError('ไม่สามารถดึงข้อมูลได้จาก Firebase');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleSearch = () => fetchReport();
 
