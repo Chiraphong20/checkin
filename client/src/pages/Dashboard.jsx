@@ -157,7 +157,7 @@ const Dashboard = () => {
   }, [checkins, absentEmployeesList, cutoffTimeStr]);
 
   // ---------------------------------------------------------
-  // 🔹 คำนวณจำนวนพนักงานแยกตามสาขา (สำหรับ Card ด้านล่าง)
+  // 🔹 คำนวณจำนวนพนักงานแยกตามสาขา
   // ---------------------------------------------------------
   const branchEmployeeStats = useMemo(() => {
     const stats = {};
@@ -238,6 +238,7 @@ const Dashboard = () => {
       return {
         employeeId: l.employeeId,
         name: emp?.name || "ไม่ทราบชื่อ",
+        nickname: emp?.nickname || "-", // ✅ แก้ไขตรงนี้: ใช้ emp?.nickname แทน item.nickname
         branch: emp?.branch || (Array.isArray(emp?.branches) ? emp.branches[0] : "-"),
         date: l.date,
         checkinTime: "-",
@@ -251,7 +252,7 @@ const Dashboard = () => {
     return [...checkins, ...leaveRecords];
   }, [checkins, leaves, employees]);
 
-  // 4. Process ข้อมูลตามสาขา
+  // 4. Process ข้อมูลตามสาขา (เพิ่ม Nickname ตรงนี้)
   const processedCheckins = useMemo(() => {
     const today = dayjs();
 
@@ -292,7 +293,8 @@ const Dashboard = () => {
             status = "นอกพื้นที่";
           }
         }
-        return { ...item, status };
+        // ✅ เพิ่ม nickname เข้าไปใน object (prioritize item -> emp -> "-")
+        return { ...item, status, nickname: item.nickname || emp?.nickname || "-" };
       });
   }, [mergedCheckins, branchEmployeeIds, selectedBranch, selectedRange, employees]);
 
@@ -326,6 +328,7 @@ const Dashboard = () => {
       .map((emp) => ({
         employeeId: emp.employeeId,
         name: emp.name,
+        nickname: emp.nickname || "-", // ✅ เพิ่ม nickname สำหรับคนขาดงาน
         branch: emp.branch || (Array.isArray(emp.branches) ? emp.branches[0] : "-"),
         date: dayjs().format("YYYY-MM-DD"),
         checkinTime: "-",
@@ -361,6 +364,7 @@ const Dashboard = () => {
         map.set(item.employeeId, {
           employeeId: item.employeeId,
           name: item.name || emp?.name || "-",
+          nickname: item.nickname || emp?.nickname || "-", // ✅ เพิ่ม nickname
           branch: item.branch || (emp?.branches ? emp.branches[0] : emp?.branch) || "-",
           history: [],
           summary: {
@@ -422,7 +426,7 @@ const Dashboard = () => {
     });
   }, [todayData, groupedRangeData, filterType, selectedRange]);
 
-  // 8. Stats Calculation (แก้ไขให้ Total นับตามสาขา)
+  // 8. Stats Calculation
   const summaryStats = useMemo(() => {
     let late = 0,
       absent = 0,
@@ -450,7 +454,6 @@ const Dashboard = () => {
     }
 
     return {
-      // ✅ แก้ไข: ใช้ branchEmployees.length แทน employees.length
       totalEmployees: branchEmployees.length,
       todayCheckins: checkinsCount,
       todayCheckouts: checkoutsCount,
@@ -477,10 +480,10 @@ const Dashboard = () => {
   };
 
   const todayColumns = [
-    { title: "รหัส", dataIndex: "employeeId", width: 100 },
+    { title: "รหัส", dataIndex: "employeeId", width: 100, align: 'center' },
     {
       title: "ชื่อ - สกุล",
-      dataIndex: "name",
+      dataIndex: "name",  align: 'center',
       render: (text, record) => (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Avatar icon={<UserOutlined />} src={record.pictureUrl} />
@@ -488,7 +491,9 @@ const Dashboard = () => {
         </div>
       ),
     },
-    { title: "สาขา", dataIndex: "branch", width: 150 },
+    // ✅ เพิ่มคอลัมน์ชื่อเล่น
+    { title: "ชื่อเล่น", dataIndex: "nickname", width: 100, align: 'center' },
+    { title: "สาขา", dataIndex: "branch", width: 200 },
     {
       title: "เวลาเข้า",
       dataIndex: "checkinTime",
@@ -532,8 +537,10 @@ const Dashboard = () => {
   ];
 
   const rangeColumns = [
-    { title: "รหัส", dataIndex: "employeeId", width: 100 },
+    { title: "รหัส", dataIndex: "employeeId", width: 80, align: 'center' },
     { title: "ชื่อ - สกุล", dataIndex: "name", width: 200 },
+    // ✅ เพิ่มคอลัมน์ชื่อเล่น
+    { title: "ชื่อเล่น", dataIndex: "nickname", width: 100, align: 'center' },
     {
       title: "มาสาย",
       dataIndex: ["summary", "late"],
@@ -773,7 +780,9 @@ const Dashboard = () => {
         </Row>
       </Card>
 
-   
+      {/* ✅ ส่วนแสดงจำนวนพนักงานแยกตามสาขา (New Section) */}
+      
+
       {/* MAIN TABLE */}
       <Card
         style={{ borderRadius: 12 }}

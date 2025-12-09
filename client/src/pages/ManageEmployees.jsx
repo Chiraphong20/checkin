@@ -159,6 +159,7 @@ const ManageEmployees = () => {
       : (record.branch ? [record.branch] : []);
     form.setFieldsValue({
       ...record,
+      nickname: record.nickname || "",
       branches: branches,
       joinDate: record.joinDate ? dayjs(record.joinDate) : null,
     });
@@ -232,6 +233,7 @@ const ManageEmployees = () => {
       const data = {
         ...values,
         name: inputName, // ใช้ชื่อที่ตัดช่องว่างแล้ว
+        nickname: values.nickname || "",
         branches: branches,
         branch: branches[0] || '',
         joinDate: values.joinDate?.format("YYYY-MM-DD"),
@@ -259,6 +261,7 @@ const ManageEmployees = () => {
   const columns = [
     { title: 'รหัสพนักงาน', dataIndex: 'employeeId', key: 'employeeId' },
     { title: 'ชื่อ - สกุล', dataIndex: 'name', key: 'name' },
+    { title: 'ชื่อเล่น', dataIndex: 'nickname', key: 'nickname' },
     {
       title: 'แผนก',
       dataIndex: 'department',
@@ -374,7 +377,13 @@ const ManageEmployees = () => {
           >
             <Input />
           </Form.Item>
-
+          <Form.Item
+            name="nickname"
+            label="ชื่อเล่น"
+            rules={[{ required: true, message: "กรุณากรอกชื่อเล่น" }]}
+          >
+            <Input placeholder="เช่น บาส, ฟ้า, โอ๊ต" />
+          </Form.Item>
           <Form.Item
             name="department"
             label="แผนก"
