@@ -1,4 +1,3 @@
-// EmployeeLeaveDashboard.jsx
 import React, { useState, useEffect } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -20,7 +19,10 @@ import {
   Spin,
   Tag,
   Checkbox,
-  Tooltip
+  Tooltip,
+  Row,
+  Col,
+  Table
 } from "antd";
 import { 
   SaveOutlined, 
@@ -32,18 +34,29 @@ import {
   UsergroupAddOutlined,
   EditOutlined,
   CloseOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  FilterOutlined
 } from "@ant-design/icons";
 import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase";
 import { nanoid } from "nanoid";
 import dayjs from "dayjs";
+import 'dayjs/locale/th';
+
+// CSS สำหรับปรับแต่งปฏิทิน
+const calendarStyles = `
+  .fc .fc-toolbar-title { font-size: 1.5em; color: #333; font-family: 'Sarabun', sans-serif; }
+  .fc .fc-button-primary { background-color: #fff; color: #555; border: 1px solid #d9d9d9; }
+  .fc .fc-button-primary:hover { background-color: #f5f5f5; border-color: #d9d9d9; }
+  .fc .fc-button-primary:not(:disabled).fc-button-active { background-color: #e6f7ff; color: #1890ff; border-color: #1890ff; }
+  .fc-event { border: none; border-radius: 4px; padding: 2px 4px; font-size: 0.85rem; cursor: pointer; }
+  .fc-day-today { background-color: #fafafa !important; }
+`;
 
 const { Option } = Select;
-const { Text } = Typography;
+const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
-// รายชื่อวันหยุดมาตรฐาน
 const standardHolidays = [
   { value: "วันขึ้นปีใหม่" },
   { value: "วันมาฆบูชา" },
@@ -66,77 +79,61 @@ const standardHolidays = [
   { value: "วันหยุดกรณีพิเศษ" }
 ];
 
-// Helper: เลือกสีตามประเภทการลา
 const getEventColor = (type, isHoliday) => {
-  if (isHoliday) return "#ffccc7"; // สีแดงอ่อน (วันหยุดนักขัตฤกษ์)
+  if (isHoliday) return "#ff4d4f";
   switch (type) {
-    case "ลาป่วย": return "#1890ff"; // น้ำเงิน
-    case "ลากิจ": return "#52c41a";  // เขียว
-    case "พักร้อน": return "#faad14"; // ส้ม
-    case "หยุด": return "#ff4d4f";   // สีแดงเข้ม (หยุดงาน/ขาดงาน)
-    case "หยุดชดเชย": return "#722ed1"; // สีม่วง
-    default: return "#808080";       // เทา
+    case "ลาป่วย": return "#3b82f6";
+    case "ลากิจ": return "#10b981";
+    case "พักร้อน": return "#f59e0b";
+    case "หยุด": return "#ef4444";
+    case "หยุดชดเชย": return "#8b5cf6";
+    default: return "#6b7280";
   }
 };
 
 export default function EmployeeLeaveDashboard() {
   const [employees, setEmployees] = useState([]);
-  const [branches, setBranches] = useState([]); // เก็บรายชื่อสาขา
+  const [branches, setBranches] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // State สำหรับจัดการวันหยุด (Holidays)
   const [holidaysList, setHolidaysList] = useState([]);
   const [isHolidayManagerOpen, setIsHolidayManagerOpen] = useState(false);
   
-  // State สำหรับ Form เพิ่ม/แก้ไข วันหยุด
   const [newHolidayRange, setNewHolidayRange] = useState(null); 
   const [newHolidayName, setNewHolidayName] = useState("");
   const [selectedBranchesForHoliday, setSelectedBranchesForHoliday] = useState([]); 
   const [allowSales, setAllowSales] = useState(false); 
   const [processingHoliday, setProcessingHoliday] = useState(false);
 
-  // State สำหรับโหมดแก้ไขวันหยุด
   const [editingHolidayId, setEditingHolidayId] = useState(null);
 
-  // Modal State (Leave Edit - ลงวันลา)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentEvent, setCurrentEvent] = useState(null);
   const [editDate, setEditDate] = useState(null);
-  const [editLeaveType, setEditLeaveType] = useState("ลากิจ");
+  const [editLeaveType, setEditLeaveType] = useState("หยุด"); // ✅ Default เป็น "หยุด"
   const [editStatus, setEditStatus] = useState("Pending");
 
-  // 1. โหลดข้อมูลพนักงาน และ สาขา
   useEffect(() => {
     const fetchMasterData = async () => {
       try {
-        // A. โหลดพนักงาน (รวมสาขา/branches)
         const empSnap = await getDocs(collection(db, "employees"));
-        const empList = empSnap.docs.map((doc) => {
-          const d = doc.data();
-          const branchesField = d.branches || (d.branch ? [d.branch] : []);
-          // เราเก็บ branchId เป็นชื่อ/ID ของสาขา (สมมติว่าใน DB เก็บเป็น id ของสาขา)
-          const primaryBranch = Array.isArray(branchesField) && branchesField.length > 0 ? branchesField[0] : (d.branch || null);
-          return {
-            id: doc.id,
-            employeeId: d.employeeId || doc.id,
-            name: d.name,
-            department: d.department || "",
-            branches: Array.isArray(branchesField) ? branchesField : (branchesField ? [branchesField] : []),
-            branchId: primaryBranch // สาขาหลัก (ใช้เพื่อเช็คสิทธิ์)
-          };
-        });
+        const empList = empSnap.docs.map((doc) => ({
+          id: doc.id,
+          employeeId: doc.data().employeeId,
+          name: doc.data().name,
+          nickname: doc.data().nickname || "", 
+          department: doc.data().department || "", 
+        }));
         setEmployees(empList);
 
-        // B. โหลดสาขา (เพื่อใช้ใน Dropdown เลือกวันหยุด)
         const branchSnap = await getDocs(collection(db, "branches"));
         const branchList = branchSnap.docs.map((doc) => ({
             id: doc.id,
             name: doc.data().name
         }));
         setBranches(branchList);
-
       } catch (err) {
         message.error("โหลดข้อมูลไม่สำเร็จ");
       }
@@ -144,54 +141,50 @@ export default function EmployeeLeaveDashboard() {
     fetchMasterData();
   }, []);
 
-  // 2. โหลดข้อมูล (วันลา + วันหยุด)
   const fetchData = async () => {
     setLoading(true);
     try {
       const leaveSnap = await getDocs(collection(db, "employee_leave"));
-      
       const qHoliday = query(collection(db, "public_holidays"), orderBy("date", "asc"));
       const holidaySnap = await getDocs(qHoliday);
 
-      // A. ประมวลผลวันหยุด (แต่ละ doc = หนึ่งวัน)
       const holidaysData = holidaySnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
       }));
       setHolidaysList(holidaysData);
 
-      // สร้าง events ของวันหยุด (background)
       const holidayEvents = holidaysData.map(h => ({
         id: h.id,
         title: `🔴 ${h.title}`,
         start: h.date,
         allDay: true,
-        backgroundColor: "#eaada8ff", 
-        borderColor: "#ffa39e",
+        backgroundColor: "#fff1f0", 
+        borderColor: "#ffccc7",
         textColor: "#cf1322",       
         display: "background",      
         extendedProps: { 
             isHoliday: true, 
             title: h.title, 
             dbId: h.id,
-            targetBranches: (h.targetBranches && h.targetBranches !== "ALL") ? h.targetBranches : "ALL",
-            allowSales: !!h.allowSales
+            targetBranches: h.targetBranches || "ALL",
+            allowSales: h.allowSales || false
         }
       }));
       
-      // B. ประมวลผลวันลา (จาก employee_leave)
       const leaveEvents = leaveSnap.docs.map((docItem) => {
         const d = docItem.data();
         const emp = employees.find((e) => e.employeeId === d.employeeId);
         const type = d.type || "ลากิจ";
         const color = getEventColor(type, false);
+        const displayName = emp ? (emp.nickname || emp.name) : "Unknown";
 
         return {
           id: d.eventId || docItem.id,
-          title: `${emp ? emp.name : "Unknown"} (${type})`,
+          title: `${displayName} (${type})`,
           start: d.date,
           backgroundColor: color,
-          borderColor: color,
+          borderColor: "transparent",
           textColor: "#fff",
           extendedProps: {
             dbId: docItem.id,
@@ -203,59 +196,7 @@ export default function EmployeeLeaveDashboard() {
         };
       });
 
-      // C. คำนวณวันหยุดชดเชย (per-date logic)
-      // For each holiday record (each date), if targetBranches != "ALL" and some branches stopped,
-      // then any Sales/Transport whose branch is NOT included for that date -> earn compensatory for that date (if date is past)
-      const compensatoryEvents = [];
-      const today = dayjs().startOf('day');
-
-      holidaysData.forEach(h => {
-        // if ALL -> nobody gets compensatory
-        const target = (h.targetBranches && h.targetBranches !== "ALL") ? h.targetBranches : null;
-        if (!target || !Array.isArray(target) || target.length === 0) {
-          // target === null means ALL or unspecified -> skip
-          return;
-        }
-
-        // there are some branches that stopped on this date
-        const stoppedSet = new Set(target); // branch IDs that stopped this specific date
-        const dateStr = h.date;
-        if (!dayjs(dateStr).isBefore(today, 'day')) {
-          // only award compensatory for past dates
-          return;
-        }
-
-        // for each employee who is Sales/Transport (03/04) and whose branchId is not in stoppedSet
-        employees.forEach(emp => {
-          if (!emp.branchId) return;
-          if (!["03", "04"].includes(emp.department)) return; // only Sales/Transport
-          if (!stoppedSet.has(emp.branchId)) {
-            // ensure not duplicate: might have same compensatory event previously in list (check by employeeId+date)
-            const exists = compensatoryEvents.some(ev => ev.extendedProps.employeeId === emp.employeeId && ev.start === dateStr);
-            if (!exists) {
-              compensatoryEvents.push({
-                id: `comp-${emp.employeeId}-${dateStr}`,
-                title: `${emp.name} (หยุดชดเชย)`,
-                start: dateStr,
-                backgroundColor: getEventColor("หยุดชดเชย", false),
-                borderColor: getEventColor("หยุดชดเชย", false),
-                textColor: "#fff",
-                extendedProps: {
-                  isHoliday: false,
-                  isCompensatory: true,
-                  earned: true, // marker: เป็นสิทธิ์ที่ได้ ไม่ใช่การลาใช้จริง
-                  employeeId: emp.employeeId,
-                  type: "หยุดชดเชย",
-                  status: "Available"
-                }
-              });
-            }
-          }
-        });
-      });
-
-      setEvents([...holidayEvents, ...leaveEvents, ...compensatoryEvents]);
-
+      setEvents([...holidayEvents, ...leaveEvents]);
     } catch (err) {
       console.error(err);
       message.error("โหลดข้อมูลไม่สำเร็จ");
@@ -264,13 +205,10 @@ export default function EmployeeLeaveDashboard() {
     }
   };
 
-  // รีโหลดเมื่อ fetchMasterData เสร็จ (employees ถูกตั้งค่า)
   useEffect(() => {
     if (employees.length > 0) fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employees]);
 
-  // --- Reset Form Function ---
   const resetHolidayForm = () => {
       setNewHolidayRange(null);
       setNewHolidayName("");
@@ -279,7 +217,6 @@ export default function EmployeeLeaveDashboard() {
       setEditingHolidayId(null);
   };
 
-  // 3. เพิ่มวันหยุด (Create) - บันทึกทีละวันตามช่วงเวลา
   const handleAddHoliday = async () => {
       if (!newHolidayRange || !newHolidayName) {
           return message.warning("กรุณาระบุช่วงวันที่และชื่อวันหยุด");
@@ -292,19 +229,15 @@ export default function EmployeeLeaveDashboard() {
           const endDate = dayjs(end);
           const promises = [];
 
-          // วนลูปบันทึกทีละวัน เพื่อให้การคำนวณวันหยุดชดเชยง่ายขึ้น
           while (current.isBefore(endDate) || current.isSame(endDate, 'day')) {
               const dateStr = current.format("YYYY-MM-DD");
-              
               promises.push(addDoc(collection(db, "public_holidays"), {
                   date: dateStr,
                   title: newHolidayName,
-                  // ถ้า array ว่าง = หยุดทุกสาขา -> "ALL"
                   targetBranches: selectedBranchesForHoliday.length > 0 ? selectedBranchesForHoliday : "ALL",
                   allowSales: allowSales,
                   createdAt: new Date().toISOString()
               }));
-
               current = current.add(1, 'day');
           }
 
@@ -313,18 +246,14 @@ export default function EmployeeLeaveDashboard() {
           resetHolidayForm();
           fetchData(); 
       } catch (e) {
-          console.error(e);
           message.error("เพิ่มวันหยุดไม่สำเร็จ");
       } finally {
           setProcessingHoliday(false);
       }
   };
 
-  // 4. อัปเดตวันหยุด (Update)
   const handleUpdateHoliday = async () => {
       if (!editingHolidayId || !newHolidayRange || !newHolidayName) return;
-
-      // กรณีแก้ไข อนุญาตให้แก้วันที่ของรายการนั้นๆ (ใช้ค่าแรกของ Range)
       const newDateStr = newHolidayRange[0].format("YYYY-MM-DD");
 
       setProcessingHoliday(true);
@@ -340,14 +269,12 @@ export default function EmployeeLeaveDashboard() {
           resetHolidayForm();
           fetchData();
       } catch (e) {
-          console.error(e);
           message.error("แก้ไขไม่สำเร็จ");
       } finally {
           setProcessingHoliday(false);
       }
   };
 
-  // เริ่มต้นแก้ไข (ดึงข้อมูลมาใส่ Form)
   const startEditHoliday = (item) => {
       setEditingHolidayId(item.id);
       setNewHolidayRange([dayjs(item.date), dayjs(item.date)]); 
@@ -356,7 +283,6 @@ export default function EmployeeLeaveDashboard() {
       setAllowSales(item.allowSales || false);
   };
 
-  // 5. ลบวันหยุด (Delete)
   const handleDeleteHoliday = async (id) => {
       try {
           await deleteDoc(doc(db, "public_holidays", id));
@@ -364,12 +290,10 @@ export default function EmployeeLeaveDashboard() {
           if (editingHolidayId === id) resetHolidayForm();
           fetchData();
       } catch (e) {
-          console.error(e);
           message.error("ลบไม่สำเร็จ");
       }
   };
 
-  // 6. คลิกวันที่บนปฏิทิน (เพิ่มวันลาให้พนักงาน)
   const handleDateSelect = (selectInfo) => {
     if (selectedEmployees.length === 0) {
       message.warning("กรุณาเลือกพนักงานก่อน");
@@ -383,122 +307,78 @@ export default function EmployeeLeaveDashboard() {
 
     while (current.isBefore(end)) {
         const dateStr = current.format("YYYY-MM-DD");
-        // หา holiday ในวันนั้น (ถ้ามี)
-        const holidayEvent = events.find(ev => ev.start === dateStr && ev.extendedProps?.isHoliday);
+        const holidayEvent = events.find(ev => ev.start === dateStr && ev.extendedProps.isHoliday);
         const isHoliday = !!holidayEvent;
 
         selectedEmployees.forEach((empId) => {
             const emp = employees.find((e) => e.id === empId);
-            if (!emp) return;
-
-            // เช็คสิทธิ์: Office (01,02) ได้หยุดแน่ๆ
-            // Sales/Transport (03,04) ได้หยุดถ้า holiday applies to their branch และ allowSales === true
-            let defaultType = "ลากิจ";
-            let createEvent = true;
-
-            if (isHoliday) {
-              const hProps = holidayEvent.extendedProps;
-              // branches for this holiday (either "ALL" or array of branch IDs)
-              const targetBranches = hProps.targetBranches === "ALL" ? "ALL" : hProps.targetBranches;
-
-              // Office always get holiday
-              if (["01", "02"].includes(emp.department)) {
-                defaultType = "หยุดนักขัตฤกษ์";
-              } else if (["03", "04"].includes(emp.department)) {
-                // sales/transport
-                const branchApplies = (targetBranches === "ALL") || (Array.isArray(targetBranches) && targetBranches.includes(emp.branchId));
-                if (branchApplies && hProps.allowSales) {
-                  defaultType = "หยุดนักขัตฤกษ์";
-                } else {
-                  // sales/transport in this branch must work -> do not auto-create a holiday event
-                  createEvent = false;
-                }
-              } else {
-                // other depts keep as default (ลากิจ) or skip
-                createEvent = false;
-              }
-            } else {
-              // not holiday => use default "ลากิจ" (admin chooses)
-              defaultType = "ลากิจ";
+            
+            let privilegedDepts = ["01", "02"]; 
+            if (isHoliday && holidayEvent?.extendedProps.allowSales) {
+                privilegedDepts.push("03", "04");
             }
 
-            if (createEvent) {
-              // Avoid duplicate on same id+date for the same emp
-              const exists = events.some(ev => ev.start === dateStr && ev.extendedProps?.employeeId === emp.employeeId && !ev.extendedProps?.isHoliday);
-              if (!exists) {
-                newEvents.push({
-                    id: nanoid(),
-                    title: `${emp.name} (${defaultType})`,
-                    start: dateStr,
-                    backgroundColor: getEventColor(defaultType, false),
-                    borderColor: getEventColor(defaultType, false),
-                    textColor: "#fff",
-                    extendedProps: { 
-                        employeeId: emp.employeeId,
-                        status: "Approved",
-                        type: defaultType,
-                        isHoliday: false
-                    },
-                });
-              }
-            }
+            const isPrivileged = privilegedDepts.includes(emp.department); 
+            
+            // ✅ Default เป็น "หยุด" ก่อน ถ้าเข้าเงื่อนไขถึงเป็น "หยุดนักขัตฤกษ์"
+            let defaultType = "หยุด"; 
+            if (isHoliday && isPrivileged) defaultType = "หยุดนักขัตฤกษ์";
+
+            const displayName = emp.nickname || emp.name;
+
+            newEvents.push({
+                id: nanoid(),
+                title: `${displayName} (${defaultType})`,
+                start: dateStr,
+                backgroundColor: getEventColor(defaultType, false),
+                borderColor: "transparent",
+                extendedProps: { 
+                    employeeId: emp.employeeId, 
+                    status: "Approved", 
+                    type: defaultType,
+                    isHoliday: false
+                },
+            });
         });
 
         current = current.add(1, 'day');
     }
 
-    setEvents(prev => [...prev, ...newEvents]);
+    setEvents([...events, ...newEvents]);
   };
 
-  // 7. คลิก Event เพื่อแก้ไข
   const handleEventClick = (info) => {
     const props = info.event.extendedProps;
 
     if (props.isHoliday) {
-        // แสดงรายละเอียดวันหยุด
         const targets = props.targetBranches === "ALL" 
             ? "ทุกสาขา" 
             : Array.isArray(props.targetBranches) 
                 ? props.targetBranches.map(bid => branches.find(b=>b.id===bid)?.name).join(", ") 
                 : "ไม่ระบุ";
         
-        const salesAllowedText = props.allowSales ? "✅ พนักงานขาย/ขนส่ง หยุดได้" : "❌ พนักงานขาย/ขนส่ง ต้องทำงาน";
+        const salesAllowedText = props.allowSales ? "✅ อนุญาต" : "❌ ไม่อนุญาต";
 
         Modal.info({
             title: `รายละเอียดวันหยุด: ${info.event.title}`,
             content: (
-                <div>
-                    <p>วันที่: {dayjs(info.event.start).format("DD/MM/YYYY")}</p>
-                    <p>สาขาที่หยุด: <b>{targets}</b></p>
-                    <p>เงื่อนไขพิเศษ: <b>{salesAllowedText}</b></p>
-                    <p style={{color:'#999', fontSize:12, marginTop: 10}}>
-                        *หากสาขาไม่ได้หยุด พนักงานสาขานั้นจะได้วันหยุดชดเชยสะสมแทน
-                    </p>
+                <div style={{ marginTop: 10 }}>
+                    <p><b>วันที่:</b> {dayjs(info.event.start).format("DD MMMM YYYY")}</p>
+                    <p><b>สาขาที่หยุด:</b> {targets}</p>
+                    <p><b>พนักงานขาย/ขนส่งหยุดได้:</b> {salesAllowedText}</p>
+                    <Alert 
+                        message="เงื่อนไขชดเชย"
+                        description="หากสาขาไม่ได้หยุด หรือพนักงานขายไม่อนุญาตให้หยุด พนักงานที่มาทำงานจะได้วันหยุดชดเชยสะสม"
+                        type="info"
+                        showIcon
+                        style={{ marginTop: 10 }}
+                    />
                 </div>
             )
         });
         return;
     }
 
-    // ถ้าเป็น compensatory (earned) ให้โชว์รายละเอียด ไม่เปิด modal แก้ไขแบบวันลา
-    if (props.isCompensatory) {
-      const emp = employees.find(e => e.employeeId === props.employeeId);
-      Modal.info({
-        title: `สิทธิ์หยุดชดเชย: ${emp ? emp.name : props.employeeId}`,
-        content: (
-          <div>
-            <p>วันที่ได้สิทธิ์: {dayjs(info.event.start).format("DD/MM/YYYY")}</p>
-            <p>สถานะ: <b>{props.status || 'Available'}</b></p>
-            <p style={{color:'#999', fontSize:12, marginTop: 10}}>
-              *รายการนี้เป็นสิทธิ์ที่ได้ (earned) ยังไม่ได้ถูกบันทึกเป็นวันลา หากต้องการใช้ให้สร้างวันลาใหม่โดยเลือกวันที่นั้นแล้วกด "บันทึกวันลาพนักงาน"
-            </p>
-          </div>
-        )
-      });
-      return;
-    }
-
-    // เปิด Modal แก้ไขวันลาปกติ
     setCurrentEvent({
       id: info.event.id,
       title: info.event.title,
@@ -514,16 +394,8 @@ export default function EmployeeLeaveDashboard() {
     setIsEditModalOpen(true);
   };
 
-  // 8. บันทึกวันลาพนักงานลง DB
   const handleSaveNewEvents = async () => {
-    // Drafts = events that are not holidays and not DB items
-    // IMPORTANT: exclude earned compensatory events (we don't auto-save them as leave)
-    const drafts = events.filter((ev) => 
-      !ev.extendedProps?.dbId && 
-      !ev.extendedProps?.isHoliday &&
-      !(ev.extendedProps?.isCompensatory && ev.extendedProps?.earned)
-    );
-
+    const drafts = events.filter((ev) => !ev.extendedProps.dbId && !ev.extendedProps.isHoliday);
     if (drafts.length === 0) return message.info("ไม่มีรายการใหม่ให้บันทึก");
 
     setLoading(true);
@@ -545,14 +417,12 @@ export default function EmployeeLeaveDashboard() {
       fetchData();
       setSelectedEmployees([]);
     } catch (err) {
-      console.error(err);
       message.error("บันทึกไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
   };
 
-  // 9. อัปเดต/ลบ วันลาพนักงาน
   const handleUpdateFromModal = async () => {
     if (!currentEvent || !editDate) return;
     const newDateStr = editDate.format("YYYY-MM-DD");
@@ -591,92 +461,178 @@ export default function EmployeeLeaveDashboard() {
     setIsEditModalOpen(false);
   };
 
+  // Render ข้อมูลในตารางวันหยุด
+  const holidayColumns = [
+      {
+          title: 'วันที่',
+          dataIndex: 'date',
+          key: 'date',
+          render: (text) => dayjs(text).format("DD MMM YYYY"),
+          width: 120
+      },
+      {
+          title: 'ชื่อวันหยุด',
+          dataIndex: 'title',
+          key: 'title',
+          render: (text) => <Text strong>{text}</Text>
+      },
+      {
+          title: 'สาขาที่หยุด',
+          key: 'targetBranches',
+          render: (_, record) => (
+              <>
+                {record.targetBranches === "ALL" || !record.targetBranches || record.targetBranches.length === 0
+                    ? <Tag color="green">หยุดทุกสาขา</Tag>
+                    : Array.isArray(record.targetBranches) && record.targetBranches.map(bid => {
+                        const bName = branches.find(b => b.id === bid)?.name || bid;
+                        return <Tag key={bid} color="blue" icon={<ShopOutlined />}>{bName}</Tag>
+                    })
+                }
+              </>
+          )
+      },
+      {
+          title: 'Sales หยุด',
+          key: 'allowSales',
+          width: 100,
+          align: 'center',
+          render: (_, record) => record.allowSales ? <Tag color="purple">ได้</Tag> : <Tag color="default">ไม่ได้</Tag>
+      },
+      {
+          title: 'จัดการ',
+          key: 'action',
+          width: 100,
+          align: 'center',
+          render: (_, record) => (
+              <Space>
+                  <Button 
+                      type="text" 
+                      size="small"
+                      icon={<EditOutlined style={{ color: '#faad14' }} />} 
+                      onClick={() => startEditHoliday(record)} 
+                  />
+                  <Popconfirm title="ลบวันหยุดนี้?" onConfirm={() => handleDeleteHoliday(record.id)}>
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                  </Popconfirm>
+              </Space>
+          )
+      }
+  ];
+
   return (
-    <div style={{ padding: 20, background: "#fff", borderRadius: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20, alignItems: 'center' }}>
+    <div style={{ padding: 24, background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+      <style>{calendarStyles}</style>
+
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24, alignItems: 'center' }}>
+        <div>
+            <Title level={3} style={{ margin: 0 }}>📅 ปฏิทินวันลา & วันหยุด</Title>
+            <Text type="secondary">จัดการวันลาพนักงานและกำหนดวันหยุดบริษัท</Text>
+        </div>
         <Space>
            <Button onClick={() => setIsHolidayManagerOpen(true)} icon={<UnorderedListOutlined />}>
               จัดการวันหยุด ({holidaysList.length})
            </Button>
-           <Button type="primary" onClick={handleSaveNewEvents} icon={<SaveOutlined />} loading={loading}>
-              บันทึกวันลาพนักงาน
+           <Button type="primary" onClick={handleSaveNewEvents} icon={<SaveOutlined />} loading={loading} size="large">
+              บันทึกการเปลี่ยนแปลง
            </Button>
         </Space>
       </div>
 
-      <div style={{ marginBottom: 20, padding: 15, background: "#f6ffed", borderRadius: 8, border: "1px solid #b7eb8f" }}>
-         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: 'center' }}>
-            <Text strong>เลือกพนักงาน (เพื่อลงวันลา):</Text>
-            <Select
-                mode="multiple"
-                style={{ width: 300 }}
-                placeholder="เลือกพนักงาน..."
-                value={selectedEmployees}
-                onChange={setSelectedEmployees}
-                optionFilterProp="children"
-            >
-                {employees.map((emp) => (
-                <Option key={emp.id} value={emp.id}>
-                    {emp.name} {["01", "02"].includes(emp.department) && "⭐"}
-                </Option>
-                ))}
-            </Select>
-            <Text type="secondary" style={{ fontSize: 12 }}>* ⭐ คือผู้มีสิทธิ์หยุดวันนักขัตฤกษ์ (Office)</Text>
-            
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
-                <div style={{ width: 12, height: 12, background: '#ffccc7', borderRadius: '50%' }}></div> <Text>วันหยุด</Text>
-                <div style={{ width: 12, height: 12, background: '#1890ff', borderRadius: '50%' }}></div> <Text>ป่วย</Text>
-                <div style={{ width: 12, height: 12, background: '#52c41a', borderRadius: '50%' }}></div> <Text>กิจ</Text>
-                <div style={{ width: 12, height: 12, background: '#faad14', borderRadius: '50%' }}></div> <Text>พักร้อน</Text>
-                <div style={{ width: 12, height: 12, background: '#722ed1', borderRadius: '50%' }}></div> <Text>หยุดชดเชย</Text>
-            </div>
-         </div>
-      </div>
+      {/* Control Bar */}
+      <Card 
+        styles={{ body: { padding: "16px 24px" } }} 
+        style={{ marginBottom: 24, borderRadius: 8, background: "#f8f9fa", border: "1px solid #e9ecef" }}
+      >
+         <Row gutter={[24, 24]} align="middle">
+            <Col xs={24} md={10}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <FilterOutlined style={{ color: '#888' }} />
+                    <Text strong>เลือกพนักงาน:</Text>
+                    <Select
+                        mode="multiple"
+                        style={{ flex: 1 }}
+                        placeholder="ค้นหาชื่อ หรือ ชื่อเล่น..."
+                        value={selectedEmployees}
+                        onChange={setSelectedEmployees}
+                        optionFilterProp="children"
+                        maxTagCount="responsive"
+                    >
+                        {employees.map((emp) => (
+                        <Option key={emp.id} value={emp.id}>
+                            {emp.name} {emp.nickname ? `(${emp.nickname})` : ""} {["01", "02"].includes(emp.department) && "⭐"}
+                        </Option>
+                        ))}
+                    </Select>
+                </div>
+            </Col>
+            <Col xs={24} md={14}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                    <Tag color="#ff4d4f">วันหยุดนักขัตฤกษ์</Tag>
+                    <Tag color="#3b82f6">ลาป่วย</Tag>
+                    <Tag color="#10b981">ลากิจ</Tag>
+                    <Tag color="#f59e0b">พักร้อน</Tag>
+                    <Tag color="#8b5cf6">หยุดชดเชย</Tag>
+                    <Tag color="#ef4444">หยุด (ปกติ)</Tag>
+                </div>
+            </Col>
+         </Row>
+      </Card>
 
+      {/* Calendar Section */}
       <Spin spinning={loading}>
-        <FullCalendar
-          plugins={[dayGridPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
-          events={events}
-          selectable={true}
-          select={handleDateSelect}
-          eventClick={handleEventClick}
-          height="auto"
-          headerToolbar={{
-            left: "prev,next today",
-            center: "title",
-            right: "dayGridMonth,dayGridWeek",
-          }}
-        />
+        <div style={{ background: 'white', padding: 10, borderRadius: 8 }}>
+            <FullCalendar
+            plugins={[dayGridPlugin, interactionPlugin]}
+            initialView="dayGridMonth"
+            events={events}
+            selectable={true}
+            select={handleDateSelect}
+            eventClick={handleEventClick}
+            height="auto"
+            headerToolbar={{
+                left: "prev,next today",
+                center: "title",
+                right: "dayGridMonth,dayGridWeek",
+            }}
+            buttonText={{
+                today: 'วันนี้',
+                month: 'เดือน',
+                week: 'สัปดาห์'
+            }}
+            dayMaxEvents={3}
+            locale="th"
+            />
+        </div>
       </Spin>
 
       {/* Modal แก้ไขวันลาพนักงาน */}
       <Modal
-        title="แก้ไขรายละเอียดวันลา"
+        title={<span><EditOutlined /> แก้ไขรายการลา</span>}
         open={isEditModalOpen}
         onCancel={() => setIsEditModalOpen(false)}
         footer={[
-          <Button key="delete" danger icon={<DeleteOutlined />} onClick={handleDeleteEvent}>ลบ</Button>,
+          <Button key="delete" danger icon={<DeleteOutlined />} onClick={handleDeleteEvent}>ลบรายการ</Button>,
           <Button key="cancel" onClick={() => setIsEditModalOpen(false)}>ยกเลิก</Button>,
-          <Button key="save" type="primary" icon={<SaveOutlined />} onClick={handleUpdateFromModal}>บันทึก</Button>,
+          <Button key="save" type="primary" icon={<SaveOutlined />} onClick={handleUpdateFromModal}>บันทึกแก้ไข</Button>,
         ]}
       >
         {currentEvent && (
-          <Form layout="vertical">
+          <Form layout="vertical" style={{ marginTop: 20 }}>
             <Form.Item label="พนักงาน">
-               <Text strong style={{ fontSize: 16 }}>{currentEvent.title.split('(')[0]}</Text>
+               <Input value={currentEvent.title.split('(')[0]} disabled prefix={<UsergroupAddOutlined />} />
             </Form.Item>
-            <Form.Item label="วันที่ลา">
-               <DatePicker value={editDate} onChange={setEditDate} style={{ width: "100%" }} allowClear={false} />
+            <Form.Item label="วันที่">
+               <DatePicker value={editDate} onChange={setEditDate} style={{ width: "100%" }} allowClear={false} format="DD/MM/YYYY" />
             </Form.Item>
             <Form.Item label="ประเภทการลา">
                <Select value={editLeaveType} onChange={setEditLeaveType}>
+                  <Option value="หยุด">หยุด (ปกติ)</Option>
                   <Option value="ลากิจ">ลากิจ</Option>
                   <Option value="ลาป่วย">ลาป่วย</Option>
                   <Option value="พักร้อน">พักร้อน</Option>
                   <Option value="หยุดนักขัตฤกษ์">หยุดนักขัตฤกษ์</Option>
                   <Option value="หยุดชดเชย">หยุดชดเชย</Option>
-                  <Option value="หยุด">หยุด (ขาดงาน)</Option>
                </Select>
             </Form.Item>
             <Form.Item label="สถานะการอนุมัติ">
@@ -690,128 +646,98 @@ export default function EmployeeLeaveDashboard() {
         )}
       </Modal>
 
-      {/* 🔥 Modal จัดการวันหยุดนักขัตฤกษ์ */}
+      {/* Modal จัดการวันหยุดนักขัตฤกษ์ */}
       <Modal
-        title="จัดการวันหยุดนักขัตฤกษ์"
+        title={<span><CalendarOutlined /> จัดการวันหยุดนักขัตฤกษ์ & วันหยุดร้าน</span>}
         open={isHolidayManagerOpen}
         onCancel={() => setIsHolidayManagerOpen(false)}
-        footer={[<Button key="close" onClick={() => setIsHolidayManagerOpen(false)}>ปิด</Button>]}
-        width={700}
+        footer={[<Button key="close" onClick={() => setIsHolidayManagerOpen(false)}>ปิดหน้าต่าง</Button>]}
+        width={800}
       >
-         {/* Card สำหรับ เพิ่ม/แก้ไข วันหยุด */}
-         <Card 
-            size="small" 
-            title={editingHolidayId ? "✏️ แก้ไขวันหยุด" : "➕ เพิ่มวันหยุดใหม่"} 
-            style={{ marginBottom: 20, background: editingHolidayId ? '#fffbe6' : '#f9f9f9', borderColor: editingHolidayId ? '#ffe58f' : '#f0f0f0' }}
-            extra={editingHolidayId && <Button size="small" onClick={resetHolidayForm} icon={<CloseOutlined />}>ยกเลิกแก้ไข</Button>}
-         >
-             <Space direction="vertical" style={{ width: '100%' }}>
-                 <Space style={{ width: '100%' }}>
-                     {/* ใช้ RangePicker เพื่อเลือกช่วงวันหยุด */}
-                     <RangePicker 
-                        placeholder={['วันที่เริ่ม', 'วันที่สิ้นสุด']} 
-                        value={newHolidayRange} 
-                        onChange={setNewHolidayRange} 
-                        style={{ width: 220 }}
-                     />
-                     
-                     <AutoComplete
-                        style={{ width: 200 }}
-                        options={standardHolidays}
-                        placeholder="ชื่อวันหยุด..."
-                        value={newHolidayName}
-                        onChange={(value) => setNewHolidayName(value)}
-                        filterOption={(inputValue, option) =>
-                            option.value.toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
-                        }
-                     />
-                 </Space>
+         <Row gutter={[24, 24]}>
+             <Col span={24}>
+                <Card 
+                    size="small" 
+                    title={editingHolidayId ? "✏️ แก้ไขวันหยุด" : "➕ เพิ่มวันหยุดใหม่"} 
+                    style={{ background: editingHolidayId ? '#fffbe6' : '#f9f9f9', borderColor: editingHolidayId ? '#ffe58f' : '#f0f0f0' }}
+                    extra={editingHolidayId && <Button size="small" onClick={resetHolidayForm} icon={<CloseOutlined />}>ยกเลิกแก้ไข</Button>}
+                >
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space style={{ width: '100%' }} wrap>
+                            <RangePicker 
+                                placeholder={['วันที่เริ่ม', 'วันที่สิ้นสุด']} 
+                                value={newHolidayRange} 
+                                onChange={setNewHolidayRange} 
+                                style={{ width: 240 }}
+                                format="DD/MM/YYYY"
+                            />
+                            
+                            <AutoComplete
+                                style={{ width: 240 }}
+                                options={standardHolidays}
+                                placeholder="ชื่อวันหยุด (เช่น วันปีใหม่)"
+                                value={newHolidayName}
+                                onChange={(value) => setNewHolidayName(value)}
+                                filterOption={(inputValue, option) =>
+                                    option.value.toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
+                                }
+                            />
+                        </Space>
 
-                 <div style={{ marginTop: 5 }}>
-                    <Text strong>สาขาที่หยุด (ถ้าว่าง = หยุดทุกสาขา):</Text>
-                    <Select
-                        mode="multiple"
-                        style={{ width: '100%' }}
-                        placeholder="เลือกสาขาที่ร้านปิด (ปล่อยว่าง = ปิดทุกสาขา)"
-                        value={selectedBranchesForHoliday}
-                        onChange={setSelectedBranchesForHoliday}
-                        optionFilterProp="children"
-                    >
-                        {branches.map(b => (
-                            <Option key={b.id} value={b.id}>{b.name}</Option>
-                        ))}
-                    </Select>
-                 </div>
+                        <div>
+                            <Text strong style={{ display: 'block', marginBottom: 5 }}>สาขาที่หยุด (ว่าง = หยุดทุกสาขา):</Text>
+                            <Select
+                                mode="multiple"
+                                style={{ width: '100%' }}
+                                placeholder="เลือกสาขาที่ร้านปิด..."
+                                value={selectedBranchesForHoliday}
+                                onChange={setSelectedBranchesForHoliday}
+                                optionFilterProp="children"
+                            >
+                                {branches.map(b => (
+                                    <Option key={b.id} value={b.id}>{b.name}</Option>
+                                ))}
+                            </Select>
+                        </div>
 
-                 <div style={{ marginTop: 5 }}>
-                    <Tooltip title="ถ้าติ๊ก = พนักงานขาย/ขนส่ง ในสาขาที่หยุด จะได้หยุดด้วย (ถ้าไม่ติ๊ก = ต้องมาทำงาน)">
-                        <Checkbox checked={allowSales} onChange={(e) => setAllowSales(e.target.checked)}>
-                            <Space>
-                                <ShopOutlined /> 
-                                อนุญาตให้ <b>พนักงานขาย/ขนส่ง</b> หยุดได้ด้วย 
-                                <InfoCircleOutlined style={{ color: '#1890ff' }} />
-                            </Space>
-                        </Checkbox>
-                    </Tooltip>
-                 </div>
+                        <div>
+                            <Tooltip title="หากติ๊ก: พนักงานขาย/ขนส่ง ในสาขาที่เลือก จะได้หยุดด้วย">
+                                <Checkbox checked={allowSales} onChange={(e) => setAllowSales(e.target.checked)}>
+                                    <Space>
+                                        <ShopOutlined /> 
+                                        อนุญาตให้ <b>พนักงานขาย/ขนส่ง</b> หยุดได้ด้วย 
+                                        <InfoCircleOutlined style={{ color: '#1890ff' }} />
+                                    </Space>
+                                </Checkbox>
+                            </Tooltip>
+                        </div>
 
-                 <Button 
-                    type="primary" 
-                    block 
-                    icon={editingHolidayId ? <SaveOutlined /> : <PlusOutlined />} 
-                    onClick={editingHolidayId ? handleUpdateHoliday : handleAddHoliday} 
-                    loading={processingHoliday} 
+                        <Button 
+                            type="primary" 
+                            block 
+                            icon={editingHolidayId ? <SaveOutlined /> : <PlusOutlined />} 
+                            onClick={editingHolidayId ? handleUpdateHoliday : handleAddHoliday} 
+                            loading={processingHoliday} 
+                            style={{ marginTop: 10 }}
+                        >
+                            {editingHolidayId ? "บันทึกการแก้ไข" : "เพิ่มวันหยุด (บันทึกรายวัน)"}
+                        </Button>
+                    </Space>
+                </Card>
+             </Col>
+             
+             <Col span={24}>
+                <Text strong style={{ fontSize: 16 }}>รายการวันหยุดปีนี้ ({holidaysList.length})</Text>
+                <Table 
+                    dataSource={holidaysList} 
+                    columns={holidayColumns} 
+                    rowKey="id" 
+                    size="small" 
+                    pagination={{ pageSize: 5 }}
                     style={{ marginTop: 10 }}
-                 >
-                    {editingHolidayId ? "บันทึกการแก้ไข" : "เพิ่มวันหยุด (บันทึกรายวัน)"}
-                 </Button>
-             </Space>
-         </Card>
-
-         <Text strong>รายการวันหยุดปีนี้ ({holidaysList.length})</Text>
-         <div style={{ maxHeight: '400px', overflowY: 'auto', marginTop: 10, border: '1px solid #f0f0f0', borderRadius: 8 }}>
-             <List
-                dataSource={holidaysList}
-                renderItem={item => (
-                    <List.Item
-                        actions={[
-                            <Button 
-                                type="text" 
-                                icon={<EditOutlined style={{ color: '#faad14' }} />} 
-                                onClick={() => startEditHoliday(item)} 
-                            />,
-                            <Popconfirm title="ลบวันหยุดนี้?" onConfirm={() => handleDeleteHoliday(item.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />} />
-                            </Popconfirm>
-                        ]}
-                    >
-                        <List.Item.Meta
-                            avatar={<CalendarOutlined style={{ fontSize: 20, color: '#ff4d4f' }} />}
-                            title={<Text strong>{item.title}</Text>}
-                            description={
-                                <div>
-                                    <div>{dayjs(item.date).format("DD MMMM YYYY")}</div>
-                                    <div style={{ marginTop: 4 }}>
-                                        {item.targetBranches === "ALL" || !item.targetBranches || item.targetBranches.length === 0
-                                            ? <Tag color="green">หยุดทุกสาขา</Tag>
-                                            : Array.isArray(item.targetBranches) && item.targetBranches.map(bid => {
-                                                const bName = branches.find(b => b.id === bid)?.name || bid;
-                                                return <Tag key={bid} color="blue" icon={<ShopOutlined />}>{bName}</Tag>
-                                            })
-                                        }
-                                        {/* Tag บอกสถานะ Sales */}
-                                        {item.allowSales 
-                                            ? <Tag color="purple" icon={<UsergroupAddOutlined />}>Sales หยุดได้</Tag>
-                                            : <Tag color="default">Sales ต้องมาทำงาน</Tag>
-                                        }
-                                    </div>
-                                </div>
-                            }
-                        />
-                    </List.Item>
-                )}
-             />
-         </div>
+                />
+             </Col>
+         </Row>
       </Modal>
     </div>
   );
