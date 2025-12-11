@@ -49,7 +49,7 @@ const PayrollReport = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // 1. 🔹 โหลดข้อมูลทั้งหมด (เหมือน Dashboard)
+  // 1. 🔹 โหลดข้อมูลทั้งหมด
   const fetchAllData = useCallback(async () => {
       setLoading(true);
       try {
@@ -59,7 +59,7 @@ const PayrollReport = () => {
               setGlobalSettings(settingsSnap.data());
           }
 
-          // B. โหลด Branches (เอาข้อมูลทั้งหมดรวมถึง Config เวลาแต่ละกะ)
+          // B. โหลด Branches
           const branchSnap = await getDocs(collection(db, "branches"));
           const branchList = [];
           const bOptions = [];
@@ -71,7 +71,7 @@ const PayrollReport = () => {
           });
           
           setBranches(branchList);
-          setBranchOptions([...new Set(bOptions)]); // Unique names
+          setBranchOptions([...new Set(bOptions)]);
 
           // C. โหลด Employees
           const empSnap = await getDocs(collection(db, "employees"));
@@ -100,12 +100,24 @@ const PayrollReport = () => {
     fetchAllData();
   }, [fetchAllData]);
 
-  // 2. 🔹 ฟังก์ชันคำนวณสถานะรายวัน (แก้ไขให้รองรับ กะ 2 และ การลา)
+  // 2. 🔹 ฟังก์ชันคำนวณสถานะรายวัน
   const calculateDailyStatus = (employee, dateStr, checkinRecord, leaveRecord, branchConfigsMap) => {
-      // 2.1 ✅ ถ้ามีใบลา (ที่อนุมัติแล้ว) -> ไม่หักเงิน
+      
+      // 2.0 ถ้าเป็นผู้บริหาร (01) ไม่หักเงินทุกกรณี
+      if (employee.department === '01') {
+          return {
+              status: 'ผู้บริหาร',
+              fine: 0, 
+              isLate: false, isAbsent: false, isLeave: false,
+              checkinTime: checkinRecord ? checkinRecord.checkinTime : '-', 
+              shift: '-'
+          };
+      }
+
+      // 2.1 ถ้ามีใบลา (ที่อนุมัติแล้ว) -> ไม่หักเงิน
       if (leaveRecord) {
           return {
-              status: leaveRecord.type, // แสดงประเภทการลา
+              status: leaveRecord.type,
               fine: 0, 
               isLate: false, isAbsent: false, isLeave: true,
               checkinTime: '-', shift: '-'
@@ -114,7 +126,6 @@ const PayrollReport = () => {
 
       // 2.2 ถ้าไม่มี Checkin -> ขาดงาน
       if (!checkinRecord) {
-          // ใช้ค่าปรับขาดงานจาก Global Setting
           const fine = globalSettings.absentFine || 50;
           return {
               status: 'ขาดงาน',
@@ -124,31 +135,47 @@ const PayrollReport = () => {
           };
       }
 
-      // 2.3 มี Checkin -> คำนวณสายตามกะที่ลงเวลามา
+      // ✅ 2.3 มี Checkin -> ใช้ค่าจาก DB ก่อนเลยเพื่อความแม่นยำ
+      // ถ้าในฐานข้อมูลมีค่าปรับ หรือ สถานะที่บันทึกไว้แล้ว ให้ใช้ค่านั้น (เพราะคำนวณมาแล้วตอนสแกน)
+      if (checkinRecord.fine !== undefined && checkinRecord.status) {
+         // เช็คเพิ่มว่าถ้า status เป็น "มาปกติ" แต่ fine > 0 (เผื่อข้อมูลเพี้ยน) ให้เชื่อ status
+         let finalFine = checkinRecord.fine;
+         if (checkinRecord.status === "มาปกติ") finalFine = 0;
+         
+         const isLate = checkinRecord.status.includes("สาย");
+
+         return {
+             status: checkinRecord.status,
+             fine: finalFine,
+             isLate: isLate,
+             isAbsent: false,
+             isLeave: false,
+             checkinTime: checkinRecord.checkinTime,
+             shift: checkinRecord.shift || 1
+         };
+      }
+
+      // --- กรณีข้อมูลเก่า หรือต้องการคำนวณใหม่ (Backup Logic) ---
       const branchName = checkinRecord.branch;
       const config = branchConfigsMap[branchName] || {}; 
-      
-      // ✅ ดูว่าพนักงานลงกะไหน (1 หรือ 2)
       const shift = checkinRecord.shift || 1; 
 
-      // ✅ เลือก Prefix ตามกะ (shift1_ หรือ shift2_)
-      // ถ้าเป็นกะ 2 ให้ใช้ shift2_ แต่ถ้าไม่มี config ให้ใช้ default บ่าย
-      const isShift2 = shift === 2;
-      const prefix = isShift2 ? 'shift2_' : 'shift1_';
-      
-      // กำหนดค่า Default เผื่อใน Config ไม่มี
-      const defaultStart = isShift2 ? "13:00" : "08:00";
-      const defaultLate = isShift2 ? "13:05" : "08:05";
-      const defaultT1 = isShift2 ? "13:15" : "08:15";
-      const defaultT2 = isShift2 ? "13:30" : "08:30";
+      let startTimeStr, lateAfterStr, t1Str, t2Str;
 
-      // ดึงเวลาจาก Config (ถ้าไม่มี ให้ใช้ startTime เดิม หรือ Default)
-      const startTimeStr = config[`${prefix}startTime`] || config.startTime || defaultStart;
-      const lateAfterStr = config[`${prefix}lateAfter`] || config.lateAfter || defaultLate;
-      const t1Str = config[`${prefix}lateThreshold1`] || config.lateThreshold1 || defaultT1;
-      const t2Str = config[`${prefix}lateThreshold2`] || config.lateThreshold2 || defaultT2;
+      // ✅ แยก Config กะ 1 และ กะ 2 อย่างเด็ดขาด (ห้าม Fallback ข้ามกะ)
+      if (shift === 2) {
+           startTimeStr = config.shift2_startTime || "13:00";
+           lateAfterStr = config.shift2_lateAfter || "13:05";
+           t1Str = config.shift2_lateThreshold1 || "13:15";
+           t2Str = config.shift2_lateThreshold2 || "13:30";
+      } else {
+           // กะ 1 หรือ Default
+           startTimeStr = config.shift1_startTime || config.startTime || "08:00";
+           lateAfterStr = config.shift1_lateAfter || config.lateAfter || "08:05";
+           t1Str = config.shift1_lateThreshold1 || config.lateThreshold1 || "08:15";
+           t2Str = config.shift1_lateThreshold2 || config.lateThreshold2 || "08:30";
+      }
 
-      // แปลงเป็นนาทีเพื่อเปรียบเทียบ
       const checkinMins = timeToMinutes(checkinRecord.checkinTime);
       const lateAfterMins = timeToMinutes(lateAfterStr);
       const t1Mins = timeToMinutes(t1Str);
@@ -158,14 +185,12 @@ const PayrollReport = () => {
       let fine = 0;
       let isLate = false;
 
-      // ค่าปรับ Global
       const { lateFine20, lateFine50, absentFine } = globalSettings;
 
-      // เปรียบเทียบเวลา
       if (checkinMins > lateAfterMins) {
           isLate = true;
           if (checkinMins <= t1Mins) {
-              status = `สาย (เกิน ${lateAfterStr})`;
+              status = `สาย (ระดับ 1)`;
               fine = lateFine20 || 20; 
           } else if (checkinMins <= t2Mins) {
               status = 'สาย (ระดับ 2)';
@@ -182,7 +207,7 @@ const PayrollReport = () => {
       };
   };
 
-  // 3. 🔹 ฟังก์ชันสร้างรายงาน (กดปุ่มคำนวณ)
+  // 3. 🔹 ฟังก์ชันสร้างรายงาน
   const handleCalculateReport = () => {
     if (!dateRange || dateRange.length !== 2) {
       message.warning('กรุณาเลือกช่วงวันที่');
@@ -191,7 +216,6 @@ const PayrollReport = () => {
 
     setCalculating(true);
 
-    // สร้าง Map ของ Branch Config เพื่อให้ค้นหาเร็วๆ (Key = ชื่อสาขา)
     const branchMap = {};
     branches.forEach(b => branchMap[b.name] = b);
 
@@ -199,16 +223,14 @@ const PayrollReport = () => {
     const startDateStr = start.format('YYYY-MM-DD');
     const endDateStr = end.format('YYYY-MM-DD');
 
-    // กรอง Checkin และ Leave ตามวันที่เลือก (Client-side Filtering)
     const filteredCheckins = checkins.filter(c => c.date >= startDateStr && c.date <= endDateStr);
     
-    // กรองวันลาที่อนุมัติแล้ว และอยู่ในช่วงเวลา
     const filteredLeaves = leaves.filter(l => {
         const lStart = dayjs(l.start || l.date);
         const lEnd = dayjs(l.end || l.date);
         return (lStart.isBefore(end) || lStart.isSame(end)) && 
                (lEnd.isAfter(start) || lEnd.isSame(start)) &&
-               l.status === 'Approved'; // ✅ เอาเฉพาะที่อนุมัติแล้ว
+               l.status === 'Approved';
     });
 
     const report = employees.map(emp => {
@@ -226,10 +248,8 @@ const PayrollReport = () => {
         while (curr.isSameOrBefore(last)) {
             const dateStr = curr.format('YYYY-MM-DD');
             
-            // หา Checkin วันนี้
             const checkinRec = filteredCheckins.find(c => c.employeeId === emp.employeeId && c.date === dateStr);
             
-            // หา Leave วันนี้
             const leaveRec = filteredLeaves.find(l => {
                 const lStart = dayjs(l.start || l.date);
                 const lEnd = dayjs(l.end || l.date);
@@ -252,7 +272,6 @@ const PayrollReport = () => {
                 }
             }
 
-            // เก็บ Detail ถ้ามีความผิดปกติ หรือ มีค่าปรับ
             if (dailyResult.isLate || dailyResult.isAbsent || dailyResult.fine > 0) {
                 details.push({
                     date: dateStr,
@@ -278,7 +297,7 @@ const PayrollReport = () => {
     message.success("คำนวณยอดเสร็จสิ้น");
   };
 
-  // Filter Data สำหรับแสดงผลในตาราง
+  // Filter & Pagination
   const filteredData = reportData.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchText.toLowerCase()) || 
                           (item.employeeId && item.employeeId.toString().includes(searchText));
