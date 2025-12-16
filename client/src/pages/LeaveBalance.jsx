@@ -4,12 +4,11 @@ import { Card, Typography, Spin, message, Space, Progress, Button, Modal, List, 
 import { UserOutlined, CalendarOutlined, FileTextOutlined, ClockCircleOutlined, FieldTimeOutlined, CrownOutlined, WarningOutlined } from "@ant-design/icons";
 import liff from "@line/liff";
 import { db } from "../firebase";
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 import "dayjs/locale/th";
-import { cache } from "../utils/cache";
 
 dayjs.locale('th');
 dayjs.extend(isBetween);
@@ -133,25 +132,16 @@ export default function LeaveBalance() {
         if (!liff.isLoggedIn()) { liff.login(); return; }
         const profile = await liff.getProfile();
 
-        // 1. โหลดข้อมูลสาขา (เพื่อทำ Map ชื่อ -> ID) - with cache
-        const cachedBranches = cache.get('BRANCHES');
-        let bMap = {};
-        if (cachedBranches) {
-          cachedBranches.forEach(b => {
-            bMap[b.name] = b.id;
-          });
-          setBranchMap(bMap);
-        } else {
-          const branchesSnap = await getDocs(collection(db, "branches"));
-          const bList = [];
-          branchesSnap.forEach(doc => {
-            const data = doc.data();
-            bMap[data.name] = doc.id; // Key=ชื่อ, Value=ID
-            bList.push({ id: doc.id, name: data.name });
-          });
-          cache.set('BRANCHES', bList);
-          setBranchMap(bMap);
-        }
+        // 1. โหลดข้อมูลสาขา (เพื่อทำ Map ชื่อ -> ID)
+        const branchesSnap = await getDocs(collection(db, "branches"));
+        const bMap = {};
+        let bList = [];
+        branchesSnap.forEach(doc => {
+          const data = doc.data();
+          bMap[data.name] = doc.id; // Key=ชื่อ, Value=ID
+          bList.push({ id: doc.id, name: data.name });
+        });
+        setBranchMap(bMap);
 
         // 2. ดึงข้อมูลพนักงาน
         const q = query(collection(db, "employees"), where("lineUserId", "==", profile.userId));
@@ -170,18 +160,10 @@ export default function LeaveBalance() {
         const currentBranchId = bMap[empData.branch] || empData.branch;
         setMyBranchId(currentBranchId);
 
-        // 3. ดึงข้อมูลวันหยุด - with cache
-        const cachedHolidays = cache.get('HOLIDAYS');
-        let holidaysData = [];
-        if (cachedHolidays) {
-          holidaysData = cachedHolidays;
-          setAllPublicHolidays(holidaysData);
-        } else {
-          const holidaysSnap = await getDocs(collection(db, "public_holidays"));
-          holidaysData = holidaysSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.date.localeCompare(b.date));
-          cache.set('HOLIDAYS', holidaysData);
-          setAllPublicHolidays(holidaysData);
-        }
+        // 3. ดึงข้อมูลวันหยุด
+        const holidaysSnap = await getDocs(collection(db, "public_holidays"));
+        const holidaysData = holidaysSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.date.localeCompare(b.date));
+        setAllPublicHolidays(holidaysData);
 
         // หาวันที่เราหยุดจริง (สำหรับคำนวณโควต้าเดือน)
         const myHolidaysDates = holidaysData.filter(h => {
@@ -200,43 +182,13 @@ export default function LeaveBalance() {
         const currentYear = dayjs().format("YYYY");
         const currentMonthStr = dayjs().format("YYYY-MM");
 
-        // 4. ดึงประวัติการเข้า-ออก และวันลา (เฉพาะปีปัจจุบัน)
-        const yearStart = `${currentYear}-01-01`;
-        const yearEnd = `${currentYear}-12-31`;
+        // 4. ดึงประวัติการเข้า-ออก และวันลา
+        const checkInQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", empData.employeeId));
+        const checkIns = (await getDocs(checkInQuery)).docs.map(d => d.data());
 
-        // Fetch check-ins for current year only
-        // Note: Use >= and filter client-side since Firestore doesn't support multiple range queries
-        const checkInQuery = query(
-          collection(db, "employee_checkin"),
-          where("employeeId", "==", empData.employeeId),
-          where("date", ">=", yearStart),
-          orderBy("date", "desc")
-        );
-        const checkIns = (await getDocs(checkInQuery)).docs
-          .map(d => d.data())
-          .filter(item => item.date >= yearStart && item.date <= yearEnd);
-
-        // Fetch leaves for current year (and any that might extend into current year)
-        // Query from start of year, then filter client-side for overlaps
-        const leaveQuery = query(
-          collection(db, "employee_leave"),
-          where("employeeId", "==", empData.employeeId),
-          where("date", ">=", yearStart),
-          orderBy("date", "desc")
-        );
+        const leaveQuery = query(collection(db, "employee_leave"), where("employeeId", "==", empData.employeeId));
         const leavesSnap = await getDocs(leaveQuery);
-        // Filter leaves that overlap with current year
-        const leaves = leavesSnap.docs
-          .map(d => d.data())
-          .filter(leave => {
-            const leaveStart = dayjs(leave.start || leave.date);
-            const leaveEnd = dayjs(leave.end || leave.date);
-            const yearStartDate = dayjs(yearStart);
-            const yearEndDate = dayjs(yearEnd);
-            // Include if leave overlaps with current year
-            return (leaveStart.isSameOrBefore(yearEndDate) && leaveEnd.isSameOrAfter(yearStartDate)) ||
-                   (leave.date >= yearStart && leave.date <= yearEnd);
-          });
+        const leaves = leavesSnap.docs.map(d => d.data());
 
         let allRecords = [];
         checkIns.forEach(item => {
