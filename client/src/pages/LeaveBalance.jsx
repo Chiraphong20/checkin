@@ -1,7 +1,12 @@
-// LeaveBalance.jsx (updated)
 import React, { useEffect, useState } from "react";
-import { Card, Typography, Spin, message, Space, Progress, Button, Modal, List, Avatar, Divider, Statistic, Tag, Select } from "antd";
-import { UserOutlined, CalendarOutlined, FileTextOutlined, ClockCircleOutlined, FieldTimeOutlined, CrownOutlined, WarningOutlined } from "@ant-design/icons";
+import { 
+  Typography, Spin, message, Progress, Button, Modal, List, Avatar, Tag, Select, Divider
+} from "antd";
+import { 
+  UserOutlined, CalendarOutlined, ClockCircleOutlined, 
+  FieldTimeOutlined, CrownOutlined, WarningOutlined, RightOutlined, 
+  CheckCircleFilled, CloseCircleFilled, HistoryOutlined
+} from "@ant-design/icons";
 import liff from "@line/liff";
 import { db } from "../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
@@ -17,6 +22,87 @@ dayjs.extend(isSameOrBefore);
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+// --- Components ย่อยเพื่อความสวยงาม (Modern UI) ---
+const StatCard = ({ title, value, total, unit, color, icon, subtext }) => (
+  <div style={{ 
+    background: '#fff', 
+    borderRadius: '20px', 
+    padding: '20px', 
+    marginBottom: '16px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
+    position: 'relative',
+    overflow: 'hidden'
+  }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ 
+            background: `${color}15`, 
+            padding: '8px', 
+            borderRadius: '12px', 
+            color: color,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            {icon}
+          </div>
+          <Text style={{ color: '#888', fontSize: '14px', fontWeight: 500 }}>{title}</Text>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+          <Text style={{ fontSize: '28px', fontWeight: '700', color: '#333' }}>{value}</Text>
+          {total !== undefined && <Text style={{ fontSize: '14px', color: '#ccc' }}>/ {total}</Text>}
+          <Text style={{ fontSize: '14px', color: '#888' }}>{unit}</Text>
+        </div>
+        {subtext && <Text style={{ fontSize: '12px', color: color, marginTop: 4, display: 'block' }}>{subtext}</Text>}
+      </div>
+      
+      {total !== undefined && total > 0 && (
+        <Progress 
+          type="circle" 
+          percent={(value / total) * 100} 
+          width={60} 
+          strokeColor={color} 
+          trailColor="#f5f5f5"
+          format={() => <span style={{ color: color, fontSize: 10 }}>{(value / total * 100).toFixed(0)}%</span>}
+        />
+      )}
+    </div>
+  </div>
+);
+
+const MenuButton = ({ icon, title, subtitle, onClick, color }) => (
+  <div 
+    onClick={onClick}
+    style={{ 
+      background: '#fff', 
+      borderRadius: '16px', 
+      padding: '16px', 
+      marginBottom: '12px',
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'space-between',
+      boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+      cursor: 'pointer',
+      border: '1px solid #f0f0f0'
+    }}
+  >
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ 
+        width: 45, height: 45, borderRadius: '12px', 
+        background: `linear-gradient(135deg, ${color} 0%, ${color}80 100%)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', fontSize: '20px', boxShadow: `0 4px 10px ${color}40`
+      }}>
+        {icon}
+      </div>
+      <div>
+        <Text style={{ fontSize: '16px', fontWeight: '600', display: 'block' }}>{title}</Text>
+        <Text style={{ fontSize: '12px', color: '#999' }}>{subtitle}</Text>
+      </div>
+    </div>
+    <RightOutlined style={{ color: '#ddd' }} />
+  </div>
+);
+
 const departments = [
   { code: "01", name: "ผู้บริหาร" },
   { code: "02", name: "Office" },
@@ -27,21 +113,15 @@ const departments = [
 export default function LeaveBalance() {
   const [loading, setLoading] = useState(true);
   const [employee, setEmployee] = useState(null);
-  const [branchMap, setBranchMap] = useState({}); // เก็บคู่ { ชื่อสาขา: ID }
+  const [branchMap, setBranchMap] = useState({});
   const [myBranchId, setMyBranchId] = useState(null);
 
   const [leaveData, setLeaveData] = useState({
-    monthlyQuota: 0,
-    accumulatedQuota: 0,
-    remainingQuota: 0,
-    annualLeaveTotal: 0,
-    annualLeaveUsed: 0,
-    usedLeaveMonth: 0,
-    holidaysInMonth: 0,
-    holidaysInYear: 0,
+    monthlyQuota: 0, accumulatedQuota: 0, remainingQuota: 0,
+    annualLeaveTotal: 0, annualLeaveUsed: 0,
+    usedLeaveMonth: 0, holidaysInMonth: 0, holidaysInYear: 0,
     workDuration: { years: 0, months: 0, days: 0 },
-    isPrivileged: false,
-    isSalesOrTransport: false,
+    isPrivileged: false, isSalesOrTransport: false,
     compensatory: { totalEarned: 0, used: 0, remaining: 0 },
     combinedLimit: { max: 0, used: 0, remaining: 0 }
   });
@@ -52,6 +132,7 @@ export default function LeaveBalance() {
   const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
   const [selectedYear, setSelectedYear] = useState(dayjs().year());
 
+  // --- Logic Functions ---
   const calculateWorkDuration = (startDate) => {
     if (!startDate) return { years: 0, months: 0, days: 0 };
     const start = dayjs(startDate);
@@ -70,15 +151,6 @@ export default function LeaveBalance() {
     return 12 + bonus;
   };
 
-  // ----------------------------------------------------------
-  // Compensatory logic (align with EmployeeLeaveDashboard.jsx)
-  // per-date logic:
-  // - only for Sales/Transport (03/04)
-  // - for each holiday date h:
-  //     if date is past AND targetBranches !== "ALL" AND
-  //     employee's branch is NOT in targetBranches => earned++
-  // - used = count of employee_leave where type === "หยุดชดเชย"
-  // ----------------------------------------------------------
   const calculateCompensatory = (allHolidays = [], allLeaves = [], branchId, deptCode) => {
     const isSalesOrTransport = ["03", "04"].includes(deptCode);
     if (!isSalesOrTransport) return { totalEarned: 0, used: 0, remaining: 0 };
@@ -89,25 +161,17 @@ export default function LeaveBalance() {
     allHolidays.forEach(h => {
       if (!h || !h.date) return;
       const dateStr = h.date;
-      // only past dates
       if (!dayjs(dateStr).isBefore(today, 'day')) return;
 
-      // targetBranches handling
       const target = (!h.targetBranches || h.targetBranches === "ALL" || (Array.isArray(h.targetBranches) && h.targetBranches.length === 0))
-        ? "ALL"
-        : h.targetBranches; // expect array of branch IDs generally
+        ? "ALL" : h.targetBranches;
 
-      // if "ALL" => no comp for anyone
       if (target === "ALL") return;
 
-      // if array => check membership
       const branchStopped = Array.isArray(target) ? target.includes(branchId) : (String(target) === String(branchId));
-
-      // special rule: if branchStopped but allowSales === false -> sales must work -> treat as NOT stopped
       const isMyBranchStopped = branchStopped && !!h.allowSales ? true : (branchStopped && !h.allowSales ? false : branchStopped);
-
-      // If my branch did NOT stop, but SOME branch(s) did stop (target has length>0) => earn comp for this date
       const someBranchesStopped = Array.isArray(target) && target.length > 0;
+      
       if (!isMyBranchStopped && someBranchesStopped) {
         earnedDates.add(dateStr);
       }
@@ -118,11 +182,7 @@ export default function LeaveBalance() {
       l.type === "หยุดชดเชย" && ["Approved", "Pending"].includes(l.status)
     ).length : 0;
 
-    return {
-      totalEarned: earned,
-      used: used,
-      remaining: Math.max(0, earned - used)
-    };
+    return { totalEarned: earned, used: used, remaining: Math.max(0, earned - used) };
   };
 
   useEffect(() => {
@@ -132,18 +192,14 @@ export default function LeaveBalance() {
         if (!liff.isLoggedIn()) { liff.login(); return; }
         const profile = await liff.getProfile();
 
-        // 1. โหลดข้อมูลสาขา (เพื่อทำ Map ชื่อ -> ID)
         const branchesSnap = await getDocs(collection(db, "branches"));
         const bMap = {};
-        let bList = [];
         branchesSnap.forEach(doc => {
           const data = doc.data();
-          bMap[data.name] = doc.id; // Key=ชื่อ, Value=ID
-          bList.push({ id: doc.id, name: data.name });
+          bMap[data.name] = doc.id;
         });
         setBranchMap(bMap);
 
-        // 2. ดึงข้อมูลพนักงาน
         const q = query(collection(db, "employees"), where("lineUserId", "==", profile.userId));
         const querySnapshot = await getDocs(q);
         if (querySnapshot.empty) {
@@ -156,33 +212,26 @@ export default function LeaveBalance() {
         empData.pictureUrl = profile.pictureUrl || empData.profileImage;
         setEmployee(empData);
 
-        // หา ID สาขาของพนักงาน (รองรับกรณี DB เก็บเป็นชื่อ)
         const currentBranchId = bMap[empData.branch] || empData.branch;
         setMyBranchId(currentBranchId);
 
-        // 3. ดึงข้อมูลวันหยุด
         const holidaysSnap = await getDocs(collection(db, "public_holidays"));
         const holidaysData = holidaysSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.date.localeCompare(b.date));
         setAllPublicHolidays(holidaysData);
 
-        // หาวันที่เราหยุดจริง (สำหรับคำนวณโควต้าเดือน)
+        // วันที่สาขาหยุด (สำหรับเช็ควันหยุด)
         const myHolidaysDates = holidaysData.filter(h => {
-          if (["01", "02"].includes(empData.department)) return true; // Office ได้หยุดทั้งหมด
-
+          if (["01", "02"].includes(empData.department)) return true;
           let isBranchOff = false;
           if (!h.targetBranches || h.targetBranches === "ALL" || (Array.isArray(h.targetBranches) && h.targetBranches.length === 0)) isBranchOff = true;
           else if (Array.isArray(h.targetBranches)) isBranchOff = h.targetBranches.includes(currentBranchId);
-
-          // ถ้า Sales และสาขาหยุดแต่ allowSales === false => Sales ต้องมาทำงาน -> treat as not stopped
           if (isBranchOff && empData.department === "03" && !h.allowSales) isBranchOff = false;
-
           return isBranchOff;
         }).map(h => h.date);
 
         const currentYear = dayjs().format("YYYY");
         const currentMonthStr = dayjs().format("YYYY-MM");
 
-        // 4. ดึงประวัติการเข้า-ออก และวันลา
         const checkInQuery = query(collection(db, "employee_checkin"), where("employeeId", "==", empData.employeeId));
         const checkIns = (await getDocs(checkInQuery)).docs.map(d => d.data());
 
@@ -190,11 +239,23 @@ export default function LeaveBalance() {
         const leavesSnap = await getDocs(leaveQuery);
         const leaves = leavesSnap.docs.map(d => d.data());
 
+        // --- 🔥 จัดการประวัติ (Filter ออกถ้าเป็น Office แล้วขึ้นขาดงานในวันหยุด) ---
         let allRecords = [];
         checkIns.forEach(item => {
           const isOff = item.status && (item.status.includes("หยุด") || item.status.includes("ขาด") || item.status.includes("สายมา") || item.status.includes("ลา"));
+          
           if (isOff && item.date.startsWith(currentYear)) {
-            allRecords.push({ date: item.date, type: "checkin", status: item.status });
+             // ✅ เพิ่มเงื่อนไขพิเศษสำหรับ Office (02)
+             if (empData.department === "02" && item.status === "ขาดงาน") {
+                 const d = dayjs(item.date);
+                 const isWeekend = d.day() === 0 || d.day() === 6; // 0=Sun, 6=Sat
+                 const isPublicHoliday = myHolidaysDates.includes(item.date);
+                 
+                 // ถ้าขาดงานในวันหยุด -> ข้ามเลย ไม่ต้องโชว์ ไม่ต้องนับ
+                 if (isWeekend || isPublicHoliday) return;
+             }
+
+             allRecords.push({ date: item.date, type: "checkin", status: item.status });
           }
         });
 
@@ -218,19 +279,12 @@ export default function LeaveBalance() {
 
         const isOffice = ["01", "02"].includes(empData.department);
         const isSalesOrTransport = ["03", "04"].includes(empData.department);
-
-        // <-- FIX: use joinDate (primary) with fallback to startDate -->
         const employmentDate = empData.joinDate || empData.startDate || null;
         const workDuration = calculateWorkDuration(employmentDate);
-
         const annualTotal = getAnnualLeaveQuota(workDuration.years, empData.department);
         const annualUsedTotal = allRecords.filter(r => r.status && r.status.includes("พักร้อน") && r.leaveStatus === 'Approved').length;
 
-        let monthlyQuota = 0;
-        let accumulatedQuota = 0;
-        let usedMonth = 0;
-        let combinedMax = 0;
-        let combinedUsed = 0;
+        let monthlyQuota = 0, accumulatedQuota = 0, usedMonth = 0, combinedMax = 0, combinedUsed = 0;
 
         const countWeekends = (month) => {
           let count = 0;
@@ -244,10 +298,7 @@ export default function LeaveBalance() {
         };
 
         if (isOffice) {
-          // Office: เสาร์ + อาทิตย์ + นักขัตฤกษ์ (myHolidaysDates already includes all for Office)
-          monthlyQuota = countWeekends(dayjs());
-          // เพิ่มจำนวนวันหยุดนักขัตฤกษ์ในเดือนนี้ (myHolidaysDates คำนวณข้างบน)
-          monthlyQuota += holidaysInMonth;
+          monthlyQuota = countWeekends(dayjs()) + holidaysInMonth;
           usedMonth = allRecords.filter(r => {
             const isThisMonth = r.date.startsWith(currentMonthStr);
             const isHoliday = myHolidaysDates.includes(r.date);
@@ -273,33 +324,20 @@ export default function LeaveBalance() {
         }
 
         const remainingQuota = (monthlyQuota + accumulatedQuota) - usedMonth;
-
-        // คำนวณวันหยุดชดเชยสะสม (ใช้ Branch ID ที่ถูกต้อง)
         const compData = calculateCompensatory(holidaysData, leaves, currentBranchId, empData.department);
-
-        const history = allRecords
-          .filter(r => r.date.startsWith(currentMonthStr))
-          .sort((a, b) => b.date.localeCompare(a.date));
+        const history = allRecords.filter(r => r.date.startsWith(currentMonthStr)).sort((a, b) => b.date.localeCompare(a.date));
 
         setLeaveData({
-          monthlyQuota,
-          accumulatedQuota,
-          remainingQuota,
-          annualLeaveTotal: annualTotal,
-          annualLeaveUsed: annualUsedTotal,
-          usedLeaveMonth: usedMonth,
-          holidaysInMonth,
-          holidaysInYear,
-          workDuration,
-          isPrivileged: isOffice,
-          isSalesOrTransport,
+          monthlyQuota, accumulatedQuota, remainingQuota,
+          annualLeaveTotal: annualTotal, annualLeaveUsed: annualUsedTotal,
+          usedLeaveMonth: usedMonth, holidaysInMonth, holidaysInYear,
+          workDuration, isPrivileged: isOffice, isSalesOrTransport,
           compensatory: compData,
           combinedLimit: { max: combinedMax, used: combinedUsed, remaining: Math.max(0, combinedMax - combinedUsed) }
         });
 
         setHistoryList(history);
         setLoading(false);
-
       } catch (err) {
         console.error(err);
         message.error("เกิดข้อผิดพลาดในการดึงข้อมูล");
@@ -307,222 +345,176 @@ export default function LeaveBalance() {
       }
     };
     initLiff();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) return <div style={{ minHeight: "100vh", display: 'flex', justifyContent: 'center', alignItems: 'center' }}><Spin size="large" /></div>;
   if (!employee) return null;
 
   const departmentName = departments.find((d) => d.code === employee.department)?.name || "-";
-  const totalAvailable = leaveData.monthlyQuota + leaveData.accumulatedQuota;
-  const percent = totalAvailable > 0 ? (leaveData.usedLeaveMonth / totalAvailable) * 100 : 0;
-
-  // กรองวันหยุดตามปีที่เลือก
   const filteredHolidays = allPublicHolidays.filter(h => h.date && h.date.startsWith(selectedYear.toString()));
   const availableYears = [...new Set(allPublicHolidays.map(h => h.date ? dayjs(h.date).year() : null).filter(Boolean))].sort((a, b) => b - a);
   const combinedPercent = leaveData.combinedLimit.max > 0 ? (leaveData.combinedLimit.used / leaveData.combinedLimit.max) * 100 : 0;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f7fa", paddingBottom: 40, fontFamily: "'Sarabun', sans-serif" }}>
-      {/* Header */}
-      <div style={{ background: "linear-gradient(135deg, #FF6539 0%, #ff8e6f 100%)", padding: "30px 20px 50px 20px", borderBottomLeftRadius: 30, borderBottomRightRadius: 30, color: "white", boxShadow: "0 4px 15px rgba(255, 101, 57, 0.3)" }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <Avatar size={70} icon={<UserOutlined />} src={employee.pictureUrl} style={{ backgroundColor: 'white', color: '#FF6539', border: '3px solid rgba(255,255,255,0.5)' }} />
+    <div style={{ minHeight: "100vh", background: "#f8f9fa", fontFamily: "'Sarabun', sans-serif", paddingBottom: 40 }}>
+      
+      {/* Header Profile Section */}
+      <div style={{ 
+        background: "linear-gradient(135deg, #FF6539 0%, #FF9E7D 100%)", 
+        padding: "40px 24px 70px 24px", 
+        borderBottomLeftRadius: 36, 
+        borderBottomRightRadius: 36,
+        color: "white",
+        boxShadow: "0 10px 30px -10px rgba(255, 101, 57, 0.4)"
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <Avatar 
+            size={80} 
+            src={employee.pictureUrl} 
+            icon={<UserOutlined />}
+            style={{ 
+              border: '4px solid rgba(255,255,255,0.3)', 
+              boxShadow: '0 4px 15px rgba(0,0,0,0.1)' 
+            }} 
+          />
           <div>
-            <Title level={4} style={{ color: "white", margin: 0 }}>{employee.name}</Title>
-            <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 14 }}>{departmentName} | {employee.branch || "-"}</Text>
-            <div style={{ marginTop: 6 }}>
-             <Tag icon={<ClockCircleOutlined />} color="#fff" style={{ borderRadius: 12, border: 'none', color: '#d4380d', fontWeight: 'bold' }}>
-  อายุงาน: {leaveData.workDuration.years} ปี {leaveData.workDuration.months} เดือน {leaveData.workDuration.days} วัน
-</Tag>
+            <Title level={3} style={{ color: '#fff', margin: 0, fontSize: '22px' }}>{employee.name}</Title>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <Tag color="rgba(0,0,0,0.2)" style={{ border: 'none', color: '#fff', borderRadius: 20, padding: '2px 10px' }}>
+                {departmentName}
+              </Tag>
+              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{employee.branch || "-"}</Text>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
+              <ClockCircleOutlined style={{ marginRight: 5 }} /> 
+              อายุงาน: {leaveData.workDuration.years} ปี {leaveData.workDuration.months} เดือน
             </div>
           </div>
         </div>
       </div>
 
-      <div style={{ padding: "0 20px", marginTop: -35 }}>
-        {/* Alert แจ้งเตือนลิมิตรวม (เฉพาะ Sales/Transport) */}
+      <div style={{ padding: "0 20px", marginTop: -50 }}>
+        
+        {/* Warning Card for Sales Limit */}
         {leaveData.isSalesOrTransport && (
-          <Card bordered={false} style={{ borderRadius: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.05)", marginBottom: 20, background: '#fff' }}>
-            <Title level={5} style={{ margin: "0 0 10px 0", color: '#cf1322' }}>
-              <WarningOutlined /> ลิมิตการหยุดรวมเดือนนี้
-            </Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              (หยุดประจำเดือน + พักร้อน ไม่เกิน {leaveData.combinedLimit.max} วัน)
-            </Text>
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text strong>ใช้ไป: {leaveData.combinedLimit.used} วัน</Text>
-                <Text type={leaveData.combinedLimit.remaining === 0 ? "danger" : "secondary"}>
-                  เหลือ {leaveData.combinedLimit.remaining} วัน
-                </Text>
-              </div>
-              <Progress
-                percent={combinedPercent}
-                status={leaveData.combinedLimit.remaining === 0 ? "exception" : "active"}
-                strokeColor={leaveData.combinedLimit.remaining === 0 ? "#ff4d4f" : "#1890ff"}
-              />
+          <div style={{ background: '#fff', borderRadius: 20, padding: 20, marginBottom: 16, border: '1px solid #FFECB3', boxShadow: '0 4px 15px rgba(255, 193, 7, 0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text strong style={{ color: '#FAAD14' }}><WarningOutlined /> ลิมิตการหยุดรวม</Text>
+              <Text style={{ fontSize: 12, color: '#999' }}>สูงสุด {leaveData.combinedLimit.max} วัน</Text>
             </div>
-          </Card>
+            <Progress 
+              percent={combinedPercent} 
+              status={leaveData.combinedLimit.remaining === 0 ? "exception" : "active"}
+              strokeColor={{ '0%': '#FFC107', '100%': '#FF9800' }}
+              showInfo={false}
+              size="small"
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
+              <Text>ใช้ไป: {leaveData.combinedLimit.used} วัน</Text>
+              <Text type={leaveData.combinedLimit.remaining === 0 ? "danger" : "secondary"}>คงเหลือ: {leaveData.combinedLimit.remaining} วัน</Text>
+            </div>
+          </div>
         )}
 
-        {/* Card 1: วันหยุดประจำเดือน */}
-        <Card bordered={false} style={{ borderRadius: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.05)", marginBottom: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-            <div>
-              <Title level={5} style={{ margin: 0, color: '#333' }}>
-                <CalendarOutlined style={{ color: '#FF6539', marginRight: 8 }} />
-                {leaveData.isPrivileged ? "วันหยุดประจำเดือน" : "หยุดประจำเดือน"} ({dayjs().format("MMM")})
-              </Title>
-            </div>
-            <Tag color={leaveData.remainingQuota >= 0 ? "success" : "error"}>
-              เหลือ {leaveData.remainingQuota} วัน
-            </Tag>
-          </div>
+        {/* 1. Monthly Quota Card */}
+        <StatCard 
+          title={leaveData.isPrivileged ? "วันหยุดประจำเดือน" : "หยุดประจำเดือน"}
+          icon={<CalendarOutlined />}
+          color="#3B82F6"
+          value={leaveData.remainingQuota}
+          total={leaveData.monthlyQuota + leaveData.accumulatedQuota}
+          unit="วันคงเหลือ"
+          subtext={`ใช้ไปแล้ว ${leaveData.usedLeaveMonth} วัน`}
+        />
 
-          <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
-              <Statistic title="โควต้าเดือนนี้" value={leaveData.monthlyQuota} suffix="วัน" valueStyle={{ fontSize: 18 }} />
-              <div style={{ marginTop: 5, fontSize: 12, color: '#666' }}>
-                {leaveData.isPrivileged ? "เสาร์-อาทิตย์ + นักขัตฤกษ์" : "โควต้าตามระเบียบ"}
-              </div>
-              <div style={{ height: 8 }} />
-              <Statistic title="ใช้ไปแล้ว" value={leaveData.usedLeaveMonth} suffix="วัน" valueStyle={{ color: '#faad14', fontSize: 20 }} />
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <Progress type="circle" percent={percent} width={90} strokeColor={leaveData.remainingQuota >= 0 ? "#52c41a" : "#ff4d4f"} format={() => <div style={{ fontSize: 12, color: '#666' }}>ใช้ไป<br /><span style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>{leaveData.usedLeaveMonth}</span></div>} />
-            </div>
-          </div>
+        {/* 2. Annual Leave Card */}
+        <StatCard 
+          title="พักร้อนสะสม"
+          icon={<CrownOutlined />}
+          color="#F59E0B"
+          value={Math.max(0, leaveData.annualLeaveTotal - leaveData.annualLeaveUsed)}
+          total={leaveData.annualLeaveTotal}
+          unit="วันคงเหลือ"
+          subtext={`สิทธิ์ ${leaveData.annualLeaveTotal} วันต่อปี`}
+        />
 
-          <Divider style={{ margin: '15px 0' }} />
-          <Button type="dashed" block onClick={() => setIsModalOpen(true)} icon={<FileTextOutlined />}>ดูประวัติการหยุด</Button>
-        </Card>
+        {/* 3. Compensatory Leave Card (Sales Only) */}
+        {leaveData.isSalesOrTransport && (
+          <StatCard 
+            title="หยุดชดเชยสะสม"
+            icon={<FieldTimeOutlined />}
+            color="#8B5CF6"
+            value={leaveData.compensatory.remaining}
+            unit="วันคงเหลือ"
+            subtext={`ได้สะสม ${leaveData.compensatory.totalEarned} / ใช้ไป ${leaveData.compensatory.used}`}
+          />
+        )}
 
-        {/* Card 2: วันพักร้อน */}
-        <Card bordered={false} style={{ borderRadius: 16, marginBottom: 20, background: "linear-gradient(to right, #e6f7ff, #ffffff)" }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <CrownOutlined style={{ color: '#1890ff' }} />
-                <Text type="secondary" style={{ fontSize: 12 }}>สิทธิ์พักร้อนสะสม</Text>
-              </div>
-              <Title level={3} style={{ margin: "5px 0", color: "#1890ff" }}>
-                {Math.max(0, leaveData.annualLeaveTotal - leaveData.annualLeaveUsed)}
-                <span style={{ fontSize: 16, fontWeight: 400, color: '#999' }}> / {leaveData.annualLeaveTotal} วัน</span>
-              </Title>
-              {leaveData.workDuration.years < 1 ? (
-                <Text type="danger" style={{ fontSize: 10 }}>*อายุงานยังไม่ครบ 1 ปี</Text>
-              ) : (
-                <Text type="secondary" style={{ fontSize: 10 }}>
-                  (สิทธิ์ตามอายุงาน {leaveData.workDuration.years} ปี)
-                </Text>
-              )}
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>ใช้ไป</Text>
-              <div style={{ fontSize: 20, color: '#1890ff', fontWeight: 'bold' }}>{leaveData.annualLeaveUsed}</div>
-            </div>
-          </div>
-        </Card>
+        <Divider style={{ borderColor: '#e5e7eb', margin: '24px 0' }}>เมนูเพิ่มเติม</Divider>
 
-        {/* Card 3: วันหยุดชดเชยสะสม (แสดงเฉพาะคนที่มีสิทธิ์) */}
-       {leaveData.isSalesOrTransport && (
-  <Card
-    bordered={false}
-    style={{
-      borderRadius: 16,
-      marginBottom: 20,
-      background: '#f9f0ff',
-      border: '1px solid #d3adf7',
-      padding: 20,
-    }}
-  >
-    <Title level={5} style={{ margin: 0, color: '#722ed1' }}>
-      <FieldTimeOutlined /> วันหยุดชดเชย (Compensatory Leave)
-    </Title>
+        {/* Action Buttons */}
+        <MenuButton 
+          title="ประวัติการลา" 
+          subtitle="ดูรายการลาและการมาสายเดือนนี้" 
+          icon={<HistoryOutlined />} 
+          color="#10B981"
+          onClick={() => setIsModalOpen(true)}
+        />
 
-    <div style={{ marginTop: 10 }}>
-      <Text strong style={{ fontSize: 16, color: '#722ed1' }}>
-        สะสมทั้งหมด: {leaveData.compensatory.totalEarned} วัน
-      </Text>
+        <MenuButton 
+          title="ปฏิทินวันหยุด" 
+          subtitle="ตรวจสอบวันหยุดประจำปีของบริษัท" 
+          icon={<CalendarOutlined />} 
+          color="#FF6539"
+          onClick={() => setIsHolidayModalOpen(true)}
+        />
 
-      <div style={{ marginTop: 6, fontSize: 14 }}>
-        <Text type="secondary">
-          ใช้ไปแล้ว: <Text strong>{leaveData.compensatory.used}</Text> วัน
-        </Text>
+        <Button block size="large" style={{ marginTop: 20, height: 50, borderRadius: 16, border: 'none', background: '#333', color: 'white', fontWeight: 600 }} onClick={() => liff.closeWindow()}>
+          ปิดหน้าต่าง
+        </Button>
       </div>
 
-      <div style={{ marginTop: 6, fontSize: 14 }}>
-        <Text type="secondary">
-          คงเหลือ: <Text strong>{leaveData.compensatory.remaining}</Text> วัน
-        </Text>
-      </div>
-
-      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
-        *ได้รับเมื่อสาขาวงษ์หิรัญหยุด แต่สาขาที่พนักงานประจำไม่ได้หยุด ในวันหยุดนักขัตฤกษ์
-      </Text>
-    </div>
-  </Card>
-)}
-
-
-        {/* ปุ่มดูปฏิทินวันหยุด */}
-        <div style={{ marginBottom: 20 }}>
-          <Card bordered={false} style={{ borderRadius: 16, background: "linear-gradient(to right, #fffbe6, #ffffff)" }} onClick={() => setIsHolidayModalOpen(true)}>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }}>
-              <div style={{ fontSize: 24 }}>📅</div>
-              <div style={{ flex: 1 }}>
-                <Text strong style={{ display: 'block', marginBottom: 4 }}>ปฏิทินวันหยุดบริษัท</Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  ตรวจสอบวันหยุดนักขัตฤกษ์ และวันหยุดตามสาขา
-                </Text>
-              </div>
-              <div>»</div>
-            </div>
-          </Card>
-        </div>
-
-        <Button block size="large" type="primary" style={{ height: 50, borderRadius: 12, background: "#333" }} onClick={() => liff.closeWindow()}>ปิดหน้าต่าง</Button>
-      </div>
-
-      {/* Modal History */}
+      {/* --- Modal ประวัติ --- */}
       <Modal
-        title="ประวัติวันหยุด (เดือนนี้)"
+        title="ประวัติเดือนนี้"
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}
         centered
-        bodyStyle={{ maxHeight: '60vh', overflowY: 'auto' }}
+        bodyStyle={{ maxHeight: '60vh', overflowY: 'auto', padding: '0 20px' }}
       >
         <List
           itemLayout="horizontal"
           dataSource={historyList}
           renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={<Avatar style={{ backgroundColor: '#fde3cf', color: '#f56a00' }} icon={<ClockCircleOutlined />} />}
-                title={dayjs(item.date).format("DD MMMM YYYY")}
-                description={<Tag color="blue">{item.status}</Tag>}
-              />
-            </List.Item>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ 
+                  background: item.status?.includes('สาย') ? '#FFF2F0' : '#F6FFED', 
+                  padding: 8, borderRadius: '50%', color: item.status?.includes('สาย') ? '#FF4D4F' : '#52C41A'
+                }}>
+                  {item.status?.includes('สาย') || item.status?.includes('ขาด') ? <CloseCircleFilled /> : <CheckCircleFilled />}
+                </div>
+                <div>
+                  <Text strong style={{ display: 'block' }}>{dayjs(item.date).format("D MMM YYYY")}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{item.type === 'checkin' ? 'ลงเวลาเข้างาน' : 'ใบลางาน'}</Text>
+                </div>
+              </div>
+              <Tag color={item.status?.includes('ปกติ') || item.status === 'Approved' ? 'green' : 'red'} style={{ borderRadius: 10 }}>
+                {item.status}
+              </Tag>
+            </div>
           )}
         />
       </Modal>
 
-      {/* Modal วันหยุดนักขัตฤกษ์ */}
+      {/* --- Modal ปฏิทิน --- */}
       <Modal
         title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>วันหยุดนักขัตฤกษ์</span>
-            <Select
-              value={selectedYear}
-              onChange={setSelectedYear}
-              style={{ width: 100 }}
-              size="small"
-            >
-              {availableYears.map(year => (
-                <Option key={year} value={year}>{year + 543}</Option>
-              ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 20 }}>
+            <span>🌴 วันหยุดบริษัท</span>
+            <Select value={selectedYear} onChange={setSelectedYear} size="small" style={{ width: 100 }}>
+              {availableYears.map(y => <Option key={y} value={y}>{y + 543}</Option>)}
             </Select>
           </div>
         }
@@ -530,47 +522,41 @@ export default function LeaveBalance() {
         onCancel={() => setIsHolidayModalOpen(false)}
         footer={null}
         centered
-        width={500}
-        bodyStyle={{ maxHeight: '60vh', overflowY: 'auto' }}
+        bodyStyle={{ maxHeight: '60vh', overflowY: 'auto', padding: '0' }}
       >
-        <div style={{ marginBottom: 10, padding: '10px', background: '#f0f0f0', borderRadius: 8, textAlign: 'center' }}>
-          <Text strong>รวม {filteredHolidays.length} วัน</Text>
-        </div>
-
         <List
-          itemLayout="horizontal"
           dataSource={filteredHolidays}
-          locale={{ emptyText: 'ไม่มีข้อมูลวันหยุดในปีนี้' }}
           renderItem={(item) => {
             let isMyBranchOff = true;
-            if (!item.targetBranches || item.targetBranches === "ALL" || (Array.isArray(item.targetBranches) && item.targetBranches.length === 0)) {
-              isMyBranchOff = true;
-            } else if (Array.isArray(item.targetBranches)) {
-              isMyBranchOff = item.targetBranches.includes(myBranchId);
-            }
-            const isSales = employee?.department === "03";
-            if (isMyBranchOff && isSales && !item.allowSales) {
-              isMyBranchOff = false;
-            }
+            if (!item.targetBranches || item.targetBranches === "ALL" || (Array.isArray(item.targetBranches) && item.targetBranches.length === 0)) isMyBranchOff = true;
+            else if (Array.isArray(item.targetBranches)) isMyBranchOff = item.targetBranches.includes(myBranchId);
+            if (isMyBranchOff && employee?.department === "03" && !item.allowSales) isMyBranchOff = false;
 
             return (
-              <List.Item style={{ opacity: isMyBranchOff ? 1 : 0.5 }}>
-                <List.Item.Meta
-                  avatar={<Avatar style={{ backgroundColor: isMyBranchOff ? '#fff1f0' : '#f0f0f0', color: isMyBranchOff ? '#ff4d4f' : '#ccc' }} icon={<CalendarOutlined />} />}
-                  title={
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <Text style={{ textDecoration: isMyBranchOff ? 'none' : 'line-through' }}>{item.title}</Text>
-                      {!isMyBranchOff && <Tag color="purple" style={{ width: 'fit-content', marginTop: 4 }}>ไม่หยุด (ได้ชดเชย)</Tag>}
+              <div style={{ 
+                padding: '16px 20px', 
+                borderBottom: '1px solid #f5f5f5', 
+                background: isMyBranchOff ? '#fff' : '#fafafa',
+                opacity: isMyBranchOff ? 1 : 0.6
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    <div style={{ 
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', 
+                      background: isMyBranchOff ? '#FFF2F0' : '#eee', 
+                      padding: '6px 12px', borderRadius: 8, minWidth: 60 
+                    }}>
+                      <span style={{ fontSize: 12, color: '#ff4d4f', fontWeight: 600 }}>{dayjs(item.date).format("MMM")}</span>
+                      <span style={{ fontSize: 20, color: '#333', fontWeight: 700 }}>{dayjs(item.date).format("D")}</span>
                     </div>
-                  }
-                  description={
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-                      <Text type="secondary">{dayjs(item.date).format("DD MMM")}</Text>
-                      <Tag color="red">{dayjs(item.date).format("ddd")}</Tag>
+                    <div>
+                      <Text style={{ fontSize: 16, fontWeight: 600, display: 'block', textDecoration: isMyBranchOff ? 'none' : 'line-through', color: isMyBranchOff ? '#333' : '#999' }}>{item.title}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(item.date).format("dddd")}</Text>
                     </div>
-                  }
-                />
-              </List.Item>
+                  </div>
+                  {!isMyBranchOff && <Tag color="purple" style={{ borderRadius: 12 }}>ได้ชดเชย</Tag>}
+                </div>
+              </div>
             )
           }}
         />
