@@ -24,10 +24,11 @@ import {
   ShopOutlined,
 } from "@ant-design/icons";
 import { db } from "../firebase";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, query, where, orderBy, limit } from "firebase/firestore";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import "dayjs/locale/th";
+import { cache } from "../utils/cache";
 
 dayjs.locale("th");
 dayjs.extend(isBetween);
@@ -63,50 +64,140 @@ const Dashboard = () => {
   }, []);
 
   // ---------------------------------------------------------
-  // 🔹 โหลดข้อมูลทั้งหมด
+  // 🔹 โหลดข้อมูลทั้งหมด (Optimized with caching and date filtering)
   // ---------------------------------------------------------
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = useCallback(async (isRefresh = false) => {
     try {
-      // 1. ดึงค่า Config
+      // 1. ดึงค่า Config (with cache)
       try {
-        const settingsSnap = await getDoc(doc(db, "settings", "checkin"));
-        if (settingsSnap.exists()) {
-          const sData = settingsSnap.data();
-          setFineAmount(sData.absentFine || 50);
-          if (sData.checkoutTime) {
-            setCutoffTimeStr(sData.checkoutTime);
+        const cachedSettings = cache.get('SETTINGS');
+        if (cachedSettings && !isRefresh) {
+          setFineAmount(cachedSettings.absentFine || 50);
+          if (cachedSettings.checkoutTime) {
+            setCutoffTimeStr(cachedSettings.checkoutTime);
+          }
+        } else {
+          const settingsSnap = await getDoc(doc(db, "settings", "checkin"));
+          if (settingsSnap.exists()) {
+            const sData = settingsSnap.data();
+            cache.set('SETTINGS', sData);
+            setFineAmount(sData.absentFine || 50);
+            if (sData.checkoutTime) {
+              setCutoffTimeStr(sData.checkoutTime);
+            }
           }
         }
       } catch (e) {
         console.log("Using default settings");
       }
 
-      // 2. ดึงข้อมูลหลัก
-      const branchSnap = await getDocs(collection(db, "branches"));
-      setBranches(branchSnap.docs.map((doc) => ({ id: doc.id, name: doc.data().name })));
+      // 2. ดึงข้อมูลหลัก (with cache for branches and employees)
+      // Branches - cache for 24 hours
+      const cachedBranches = cache.get('BRANCHES');
+      if (cachedBranches && !isRefresh) {
+        setBranches(cachedBranches);
+      } else {
+        const branchSnap = await getDocs(collection(db, "branches"));
+        const branchesData = branchSnap.docs.map((doc) => ({ id: doc.id, name: doc.data().name }));
+        cache.set('BRANCHES', branchesData);
+        setBranches(branchesData);
+      }
 
-      const empSnap = await getDocs(collection(db, "employees"));
-      setEmployees(empSnap.docs.map((doc) => doc.data()));
+      // Employees - cache for 30 minutes
+      const cachedEmployees = cache.get('EMPLOYEES');
+      if (cachedEmployees && !isRefresh) {
+        setEmployees(cachedEmployees);
+      } else {
+        const empSnap = await getDocs(collection(db, "employees"));
+        const employeesData = empSnap.docs.map((doc) => doc.data());
+        cache.set('EMPLOYEES', employeesData);
+        setEmployees(employeesData);
+      }
 
-      const checkinSnap = await getDocs(collection(db, "employee_checkin"));
-      setCheckins(checkinSnap.docs.map((doc) => doc.data()));
+      // 3. ดึงข้อมูล Check-ins และ Leaves (with date filtering)
+      const today = dayjs();
+      let startDate, endDate;
 
-      const leaveSnap = await getDocs(collection(db, "employee_leave"));
-      setLeaves(leaveSnap.docs.map((doc) => doc.data()));
+      // Calculate date range based on selectedRange
+      if (selectedRange === "today") {
+        startDate = today.format("YYYY-MM-DD");
+        endDate = today.format("YYYY-MM-DD");
+      } else if (selectedRange === "7days") {
+        startDate = today.subtract(7, "day").format("YYYY-MM-DD");
+        endDate = today.format("YYYY-MM-DD");
+      } else if (selectedRange === "month") {
+        startDate = today.startOf("month").format("YYYY-MM-DD");
+        endDate = today.endOf("month").format("YYYY-MM-DD");
+      } else {
+        // Default: last 30 days
+        startDate = today.subtract(30, "day").format("YYYY-MM-DD");
+        endDate = today.format("YYYY-MM-DD");
+      }
+
+      // Fetch check-ins with date filter
+      // Note: Firestore doesn't support range queries on same field, so we use >= and filter client-side
+      const checkinQuery = query(
+        collection(db, "employee_checkin"),
+        where("date", ">=", startDate),
+        orderBy("date", "desc")
+      );
+      const checkinSnap = await getDocs(checkinQuery);
+      // Filter client-side to ensure we only get dates within range
+      const checkinsData = checkinSnap.docs
+        .map((doc) => doc.data())
+        .filter((item) => item.date >= startDate && item.date <= endDate);
+      setCheckins(checkinsData);
+
+      // Fetch leaves - query from startDate onwards, then filter client-side
+      // Leaves might have start/end dates, so we need to check if they overlap with our range
+      const leaveQuery = query(
+        collection(db, "employee_leave"),
+        where("date", ">=", startDate),
+        orderBy("date", "desc")
+      );
+      const leaveSnap = await getDocs(leaveQuery);
+      // Filter leaves that overlap with our date range
+      const leavesData = leaveSnap.docs
+        .map((doc) => doc.data())
+        .filter((leave) => {
+          const leaveStart = dayjs(leave.start || leave.date);
+          const leaveEnd = dayjs(leave.end || leave.date);
+          const rangeStart = dayjs(startDate);
+          const rangeEnd = dayjs(endDate);
+          // Check if leave overlaps with our range
+          return (
+            (leaveStart.isSameOrBefore(rangeEnd) && leaveEnd.isSameOrAfter(rangeStart)) ||
+            leave.date >= startDate
+          );
+        });
+      setLeaves(leavesData);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedRange]);
 
-  // Initial Load & Auto Refresh
+  // Initial Load & Smart Auto Refresh
   useEffect(() => {
     setLoading(true);
-    fetchAllData();
-    const interval = setInterval(fetchAllData, 60000);
+    fetchAllData(false); // Initial load with cache
+    
+    // Smart refresh: only refresh today's data every 2 minutes
+    const interval = setInterval(() => {
+      // Only refresh check-ins and leaves for today, keep cached branches/employees
+      fetchAllData(true);
+    }, 120000); // 2 minutes instead of 1 minute
+    
     return () => clearInterval(interval);
   }, [fetchAllData]);
+
+  // Refetch when selectedRange changes
+  useEffect(() => {
+    if (!loading) {
+      fetchAllData(false);
+    }
+  }, [selectedRange]);
 
   // ---------------------------------------------------------
   // 🔹 คำนวณรายชื่อคนขาดงาน (Live Calculation)
