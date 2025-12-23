@@ -599,6 +599,10 @@ export default function EmployeeCheckIn() {
                 </Row>
             </Card>
         )}
+           <div style={{ marginTop: 30, paddingBottom: 20 }}>
+                       <Button block size="large" type="primary" style={{ height: 50, borderRadius: 12, background: "#333" }} onClick={() => liff.closeWindow()}>ปิดหน้าต่าง</Button>
+               
+              </div>
       </div>
 
       {/* --- Modal เลือกกะ (Shift Selection) --- */}
@@ -641,7 +645,7 @@ export default function EmployeeCheckIn() {
          <CheckCircleFilled style={{ fontSize: 60, color: '#52c41a', marginBottom: 20 }} />
          <Title level={4} style={{ color: '#52c41a' }}>สุดยอด! มาทันเวลา</Title>
          <img src="/ontime.gif" alt="On time" style={{ width: 200, marginBottom: 20 }} />
-         <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20px 0' }}><pre>{lastCheckInMessage}</pre></div>
+         <div style={{ background: '#f6ffed', padding: 15, borderRadius: 10, margin: '20ผpx 0' }}><pre>{lastCheckInMessage}</pre></div>
          <Button type="primary" block size="large" onClick={()=>setShowSuccessModal(false)}>ตกลง</Button>
       </Modal>
 

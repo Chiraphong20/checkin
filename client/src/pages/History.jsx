@@ -24,20 +24,43 @@ export default function History() {
   const [employee, setEmployee] = useState(null);
   const [records, setRecords] = useState([]);
   
-  // 📱 เปลี่ยนจากช่วงวันที่ เป็น "เดือนที่เลือก" (เริ่มต้นคือเดือนปัจจุบัน)
+  // State สำหรับเก็บข้อมูลวันหยุดและสาขา
+  const [holidays, setHolidays] = useState([]); 
+  const [branchMap, setBranchMap] = useState({}); // Map: ชื่อสาขา -> ID สาขา
+
   const [selectedMonth, setSelectedMonth] = useState(dayjs());
   const [fetching, setFetching] = useState(false);
 
   const getStatusColor = (value) => {
     const v = typeof value === "string" ? value : "";
-    if (v.includes("หยุด")) return "red";
+    if (v.includes("วันหยุด")) return "purple"; // สีม่วงสำหรับวันหยุด
+    if (v.includes("หยุด")) return "red";       // สีแดงสำหรับหยุดปกติ/ขาดงาน
     if (v.includes("สาย")) return "orange";
     return "green";
   };
 
   useEffect(() => {
-    const initLiff = async () => {
+    const initData = async () => {
       try {
+        // 1. โหลดข้อมูลสาขา (เพื่อเช็คเงื่อนไขวันหยุดรายสาขา)
+        const branchSnap = await getDocs(collection(db, "branches"));
+        const bMap = {};
+        branchSnap.docs.forEach(doc => {
+            if (doc.data().name) {
+                bMap[doc.data().name] = doc.id;
+            }
+        });
+        setBranchMap(bMap);
+
+        // 2. โหลดข้อมูลวันหยุดทั้งหมด
+        const holidaySnap = await getDocs(collection(db, "public_holidays"));
+        const holidayData = holidaySnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        setHolidays(holidayData);
+
+        // 3. เริ่มต้น LIFF
         await liff.init({ liffId: "2008408737-4x2nLQp8" });
         if (!liff.isLoggedIn()) {
           liff.login();
@@ -47,7 +70,6 @@ export default function History() {
         const profile = await liff.getProfile();
         const lineUserId = profile.userId;
 
-        // 🔹 ดึงข้อมูลพนักงาน
         const q = query(collection(db, "employees"), where("lineUserId", "==", lineUserId));
         const snapshot = await getDocs(q);
 
@@ -61,9 +83,9 @@ export default function History() {
         setEmployee(empData);
         setLoading(false);
 
-        // โหลดข้อมูลครั้งแรก (เดือนปัจจุบัน)
-        // ส่ง startOf และ endOf ของเดือนปัจจุบันไปค้นหา
+        // โหลดประวัติ (เดือนปัจจุบัน)
         fetchCheckInHistory(empData.employeeId, dayjs().startOf('month'), dayjs().endOf('month'));
+
       } catch (err) {
         console.error(err);
         message.error("เกิดข้อผิดพลาดในการโหลดข้อมูล");
@@ -71,7 +93,7 @@ export default function History() {
       }
     };
 
-    initLiff();
+    initData();
   }, []);
 
   const fetchCheckInHistory = async (employeeId, startDate, endDate) => {
@@ -103,13 +125,33 @@ export default function History() {
     setFetching(false);
   };
 
-  // 🔄 ฟังก์ชันเมื่อเปลี่ยนเดือน
   const handleMonthChange = (date) => {
     if (date) {
         setSelectedMonth(date);
-        // เมื่อเลือกเดือน ให้ค้นหาตั้งแต่วันที่ 1 ถึง สิ้นเดือน ทันที
         fetchCheckInHistory(employee.employeeId, date.startOf('month'), date.endOf('month'));
     }
+  };
+
+  // ✅ ฟังก์ชันเช็ควันหยุด
+  const checkHolidayStatus = (record) => {
+      // 1. หาว่าวันนั้นมีวันหยุดในระบบไหม
+      const holiday = holidays.find(h => h.date === record.date);
+      
+      if (holiday) {
+          // 2. ถ้ามี เช็คเงื่อนไขสาขา (targetBranches)
+          const recordBranchId = branchMap[record.branch];
+          
+          const isTargetBranch = 
+              !holiday.targetBranches || 
+              holiday.targetBranches === "ALL" || 
+              holiday.targetBranches.length === 0 || 
+              (recordBranchId && Array.isArray(holiday.targetBranches) && holiday.targetBranches.includes(recordBranchId));
+
+          if (isTargetBranch) {
+              return { isHoliday: true, holidayName: holiday.title };
+          }
+      }
+      return { isHoliday: false };
   };
 
   if (loading) {
@@ -120,30 +162,18 @@ export default function History() {
     );
   }
 
-  const departmentName =
-    departments.find((d) => d.code === employee?.department)?.name || "-";
-
   return (
     <div
       style={{
         maxWidth: 600,
         minHeight: "100vh",
-        margin: "0 auto", // ปรับ margin ให้ชิดขอบบนในมือถือ
-        padding: "20px 15px", // ลด padding ด้านข้างเล็กน้อย
-        background: "linear-gradient(180deg, #FF6539 0%, #FF8E6F 100%)", // เพิ่มลูกเล่นพื้นหลัง
+        margin: "0 auto",
+        padding: "20px 15px",
+        background: "linear-gradient(180deg, #FF6539 0%, #FF8E6F 100%)",
         minHeight: "100vh"
       }}
     >
-      {/* Header Profile Section */}
-      <div style={{ textAlign: "center", marginBottom: 20 }}>
-        <div style={{ 
-          
-        }}>
-        </div>
-       
-      </div>
-
-      {/* Filter Section (Card) */}
+      {/* Filter Section */}
       <div style={{ 
           background: 'white', 
           borderRadius: 16, 
@@ -156,34 +186,21 @@ export default function History() {
         </div>
         
         <div style={{ display: 'flex', gap: 10 }}>
-            {/* ✅ ใช้ DatePicker แบบ Month Picker เพื่อความง่ายในมือถือ */}
             <DatePicker
                 picker="month"
                 format="MMMM YYYY"
                 value={selectedMonth}
                 onChange={handleMonthChange}
-                inputReadOnly // ป้องกันคีย์บอร์ดเด้ง
+                inputReadOnly
                 allowClear={false}
-                style={{ 
-                    flex: 1, 
-                    height: 45, // ปุ่มใหญ่ขึ้น
-                    borderRadius: 8,
-                    fontSize: 16
-                }}
+                style={{ flex: 1, height: 45, borderRadius: 8, fontSize: 16 }}
                 placeholder="เลือกเดือน"
             />
-            {/* ปุ่ม Refresh (เผื่อต้องการกดเอง) */}
             <Button 
                 type="primary"
                 onClick={() => handleMonthChange(selectedMonth)}
                 loading={fetching}
-                style={{ 
-                    height: 45, 
-                    width: 45, 
-                    borderRadius: 8,
-                    background: '#333',
-                    borderColor: '#333'
-                }}
+                style={{ height: 45, width: 45, borderRadius: 8, background: '#333', borderColor: '#333' }}
                 icon={<SearchOutlined />}
             />
         </div>
@@ -203,38 +220,51 @@ export default function History() {
           </div>
         ) : records.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {records.map((r, index) => (
-              <div
-                key={index}
-                style={{
-                  borderRadius: 12,
-                  padding: 16,
-                  backgroundColor: "#FFF",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                  borderLeft: `5px solid ${getStatusColor(r.status)}` // แถบสีด้านซ้าย
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <Text strong style={{ fontSize: 16 }}>
-                    {dayjs(r.date).format("DD MMM YYYY")}
-                  </Text>
-                  <Tag color={getStatusColor(r.status)} style={{ margin: 0, borderRadius: 4 }}>
-                    {r.status || "-"}
-                  </Tag>
-                </div>
-                
-                <div style={{ display: "flex", justifyContent: "space-between", color: '#666', fontSize: 14 }}>
-                  <div>
-                    <span>⏰ {r.checkinTime || "-"}</span>
-                    <span style={{ margin: '0 8px' }}>|</span>
-                    <span>📍 {r.branch || "-"}</span>
+            {records.map((r, index) => {
+              // 🔥 ตรวจสอบวันหยุด
+              const { isHoliday, holidayName } = checkHolidayStatus(r);
+              
+              // ถ้าเป็นวันหยุด ให้แสดงชื่อวันหยุด
+              const displayStatus = isHoliday ? `วันหยุด (${holidayName})` : (r.status || "-");
+              
+              // เปลี่ยนสีถ้าเป็นวันหยุด
+              const displayColor = isHoliday ? "purple" : getStatusColor(r.status);
+
+              return (
+                <div
+                  key={index}
+                  style={{
+                    borderRadius: 12,
+                    padding: 16,
+                    backgroundColor: "#FFF",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                    borderLeft: `5px solid ${displayColor}`
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <Text strong style={{ fontSize: 16 }}>
+                      {dayjs(r.date).format("DD MMM YYYY")}
+                    </Text>
+                    <Tag color={displayColor} style={{ margin: 0, borderRadius: 4 }}>
+                      {displayStatus}
+                    </Tag>
                   </div>
-                  {r.fine > 0 && (
-                     <Text type="danger" strong>ปรับ {r.fine}฿</Text>
-                  )}
+                  
+                  <div style={{ display: "flex", justifyContent: "space-between", color: '#666', fontSize: 14 }}>
+                    <div>
+                      <span>⏰ {r.checkinTime || "-"}</span>
+                      <span style={{ margin: '0 8px' }}>|</span>
+                      <span>📍 {r.branch || "-"}</span>
+                    </div>
+                    {/* ✅ แก้ไข: แสดงค่าปรับเฉพาะเมื่อ r.fine > 0 และ "ไม่ใช่" วันหยุด */}
+                    {r.fine > 0 && !isHoliday && (
+                      <Text type="danger" strong>ปรับ {r.fine}฿</Text>
+                    )}
+                    {/* กรณีเป็นวันหยุด จะไม่แสดงค่าปรับเลย แม้ใน DB จะมีค่าก็ตาม */}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div style={{ background: 'white', borderRadius: 16, padding: 30, textAlign: 'center' }}>
@@ -245,8 +275,7 @@ export default function History() {
 
       {/* Footer Button */}
       <div style={{ marginTop: 30, paddingBottom: 20 }}>
-               <Button block size="large" type="primary" style={{ height: 50, borderRadius: 12, background: "#333" }} onClick={() => liff.closeWindow()}>ปิดหน้าต่าง</Button>
-       
+          <Button block size="large" type="primary" style={{ height: 50, borderRadius: 12, background: "#333" }} onClick={() => liff.closeWindow()}>ปิดหน้าต่าง</Button>
       </div>
     </div>
   );

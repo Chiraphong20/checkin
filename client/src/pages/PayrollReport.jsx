@@ -32,7 +32,7 @@ const PayrollReport = () => {
   const [leaves, setLeaves] = useState([]);
   const [branches, setBranches] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({});
-  const [holidays, setHolidays] = useState([]); // ✅ เก็บวันหยุด
+  const [holidays, setHolidays] = useState([]); 
   
   const [dateRange, setDateRange] = useState([dayjs().startOf('month'), dayjs().endOf('month')]);
   const [reportData, setReportData] = useState([]);
@@ -44,6 +44,7 @@ const PayrollReport = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState("ทั้งหมด");
   const [branchOptions, setBranchOptions] = useState([]);
+  const [branchMap, setBranchMap] = useState({}); 
   
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -60,15 +61,21 @@ const PayrollReport = () => {
           const branchSnap = await getDocs(collection(db, "branches"));
           const branchList = [];
           const bOptions = [];
+          const bMap = {};
           
           branchSnap.forEach((doc) => {
               const data = doc.data();
-              branchList.push({ id: doc.id, ...data });
-              if (data.name) bOptions.push(data.name);
+              const bObj = { id: doc.id, ...data };
+              branchList.push(bObj);
+              if (data.name) {
+                  bOptions.push(data.name);
+                  bMap[data.name] = bObj;
+              }
           });
           
           setBranches(branchList);
           setBranchOptions([...new Set(bOptions)]);
+          setBranchMap(bMap);
 
           const empSnap = await getDocs(collection(db, "employees"));
           const empList = empSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
@@ -82,7 +89,6 @@ const PayrollReport = () => {
           const leaveList = leaveSnap.docs.map((doc) => doc.data());
           setLeaves(leaveList);
           
-          // ✅ ดึงวันหยุด
           const holidaySnap = await getDocs(collection(db, "public_holidays"));
           setHolidays(holidaySnap.docs.map((doc) => doc.data()));
 
@@ -98,95 +104,112 @@ const PayrollReport = () => {
     fetchAllData();
   }, [fetchAllData]);
 
-  // 2. 🔹 ฟังก์ชันคำนวณสถานะรายวัน (Logic สมบูรณ์)
-  const calculateDailyStatus = (employee, dateStr, checkinRecord, leaveRecord, branchConfigsMap) => {
+  // 2. 🔹 ฟังก์ชันคำนวณสถานะรายวัน (ปรับปรุงให้ Check-in ชนะขาดงานเสมอ)
+  const calculateDailyStatus = (employee, dateStr, checkinRecord, leaveRecord, bMap) => {
       // 2.0 ผู้บริหาร (01) -> ไม่หัก
       if (employee.department === '01') {
-          return { status: 'ผู้บริหาร', fine: 0, isLate: false, isAbsent: false, isLeave: false, checkinTime: checkinRecord ? checkinRecord.checkinTime : '-', shift: '-' };
+          return { status: 'ผู้บริหาร', fine: 0, isLate: false, isAbsent: false, isLeave: false, checkinTime: '-', shift: '-' };
       }
 
-      // ✅ 2.0.1 Office (02) -> เช็คเสาร์-อาทิตย์ และ วันหยุดนักขัตฤกษ์
+      // 2.1 ตรวจสอบวันหยุด (สำหรับแผนก 02 Office)
+      let isHolidayOrWeekend = false;
+      let holidayName = "";
+
       if (employee.department === '02') {
           const currentDay = dayjs(dateStr);
-          const isWeekend = currentDay.day() === 0 || currentDay.day() === 6; // 0=อาทิตย์, 6=เสาร์
+          const isWeekend = currentDay.day() === 0 || currentDay.day() === 6; 
           
-          const isPublicHoliday = holidays.some(h => 
+          const foundHoliday = holidays.find(h => 
               h.date === dateStr && 
-              // เช็คว่า Office สาขานี้หยุดหรือไม่
-              (!h.targetBranches || h.targetBranches === "ALL" || h.targetBranches.length === 0 || (Array.isArray(h.targetBranches) && branchConfigsMap[employee.branch] && h.targetBranches.includes(branchConfigsMap[employee.branch].id)))
+              (!h.targetBranches || h.targetBranches === "ALL" || h.targetBranches.length === 0 || 
+               (Array.isArray(h.targetBranches) && bMap[employee.branch] && h.targetBranches.includes(bMap[employee.branch].id)))
           );
 
-          if ((isWeekend || isPublicHoliday) && !checkinRecord) {
-              return {
-                  status: 'วันหยุด', 
-                  fine: 0,
-                  isLate: false, isAbsent: false, isLeave: false,
-                  checkinTime: '-', shift: '-'
-              };
+          if (isWeekend) {
+              isHolidayOrWeekend = true;
+              holidayName = "วันหยุดสุดสัปดาห์";
+          } else if (foundHoliday) {
+              isHolidayOrWeekend = true;
+              holidayName = foundHoliday.title;
           }
       }
 
-      // 2.1 ลา (Approved) -> ไม่หัก
+      // --- Priority Logic ---
+      // 1. มาทำงานจริง (Real Check-in / Admin Manual) -> ชนะขาดงานเสมอ!
+      // เช็คว่ามี Record และ (เป็น Manual (Admin) หรือ (ไม่ใช่ Auto และไม่ใช่ ขาดงาน))
+      const isRealCheckin = checkinRecord && (
+          checkinRecord.isManual === true || 
+          (!checkinRecord.isAutoAbsent && checkinRecord.status !== 'ขาดงาน')
+      );
+
+      if (isRealCheckin) {
+          let fine = checkinRecord.fine || 0;
+          let status = checkinRecord.status;
+
+          // Re-validate: ถ้าสถานะคือ "มาปกติ" ต้องไม่เสียค่าปรับ (เผื่อ DB เก่าเก็บค่าผิด)
+          if (status.includes("ปกติ")) fine = 0;
+          
+          const isLate = status.includes("สาย");
+
+          // ถ้าเป็นวันหยุดแต่มารูดบัตร/Admin ลงให้ ก็ถือว่ามาทำงาน (ไม่หักเงิน)
+          return { 
+              status: status, 
+              fine: fine, 
+              isLate: isLate, 
+              isAbsent: false, 
+              isLeave: false, 
+              checkinTime: checkinRecord.checkinTime, 
+              shift: checkinRecord.shift || 1 
+          };
+      }
+
+      // 2. ใบลา (Approved Leave) -> ชนะ Auto Absent
       if (leaveRecord) {
-          return { status: leaveRecord.type, fine: 0, isLate: false, isAbsent: false, isLeave: true, checkinTime: '-', shift: '-' };
+          return { 
+              status: leaveRecord.type, 
+              fine: 0, 
+              isLate: false, 
+              isAbsent: false, 
+              isLeave: true, 
+              checkinTime: '-', 
+              shift: '-' 
+          };
       }
 
-      // 2.2 ไม่มี Checkin -> ขาดงาน
-      if (!checkinRecord) {
-          const fine = globalSettings.absentFine || 50;
-          return { status: 'ขาดงาน', fine: fine, isLate: false, isAbsent: true, isLeave: false, checkinTime: '-', shift: '-' };
+      // 3. วันหยุด (Office 02) -> ถ้าไม่มา ก็คือวันหยุด
+      if (isHolidayOrWeekend) {
+           return {
+              status: `วันหยุด (${holidayName})`, 
+              fine: 0,
+              isLate: false, 
+              isAbsent: false, 
+              isLeave: false,
+              checkinTime: '-', 
+              shift: '-'
+          };
       }
 
-      // 2.3 มี Checkin -> ใช้ข้อมูลจริงจาก DB
-      if (checkinRecord.fine !== undefined && checkinRecord.status) {
-         let finalFine = checkinRecord.fine;
-         if (checkinRecord.status === "มาปกติ") finalFine = 0;
-         const isLate = checkinRecord.status.includes("สาย");
-         return { status: checkinRecord.status, fine: finalFine, isLate: isLate, isAbsent: false, isLeave: false, checkinTime: checkinRecord.checkinTime, shift: checkinRecord.shift || 1 };
-      }
-
-      // Fallback calculation (เผื่อข้อมูลเก่า)
-      const branchName = checkinRecord.branch;
-      const config = branchConfigsMap[branchName] || {}; 
-      const shift = checkinRecord.shift || 1; 
-
-      // ✅ บังคับเลือก Config ตามกะที่พนักงานลงมา
-      const prefix = (shift === 2) ? 'shift2_' : (config.shift1_startTime ? 'shift1_' : '');
-      const defaultStart = shift === 2 ? "13:00" : "08:00";
-      const defaultLate = shift === 2 ? "13:05" : "08:05";
-
-      const startTimeStr = config[`${prefix}startTime`] || config.startTime || defaultStart;
-      const lateAfterStr = config[`${prefix}lateAfter`] || config.lateAfter || defaultLate;
-      const t1Str = config[`${prefix}lateThreshold1`] || config.lateThreshold1 || (shift === 2 ? "13:15" : "08:15");
-      const t2Str = config[`${prefix}lateThreshold2`] || config.lateThreshold2 || (shift === 2 ? "13:30" : "08:30");
-
-      const checkinMins = timeToMinutes(checkinRecord.checkinTime);
-      const lateAfterMins = timeToMinutes(lateAfterStr);
-      const t1Mins = timeToMinutes(t1Str);
-      const t2Mins = timeToMinutes(t2Str);
-
-      let status = 'ปกติ';
-      let fine = 0;
-      let isLate = false;
-      const { lateFine20, lateFine50, absentFine } = globalSettings;
-
-      if (checkinMins > lateAfterMins) {
-          isLate = true;
-          if (checkinMins <= t1Mins) { status = `สาย (เกิน ${lateAfterStr})`; fine = lateFine20 || 20; } 
-          else if (checkinMins <= t2Mins) { status = 'สาย (ระดับ 2)'; fine = lateFine50 || 50; } 
-          else { status = 'สายมาก/ขาด'; fine = absentFine || 50; }
-      }
-
-      return { status, fine, isLate, isAbsent: false, isLeave: false, checkinTime: checkinRecord.checkinTime, shift: shift };
+      // 4. Auto Absent หรือ ไม่มี Record -> ขาดงาน
+      const fine = globalSettings.absentFine || 50;
+      return { 
+          status: 'ขาดงาน', 
+          fine: fine, 
+          isLate: false, 
+          isAbsent: true, 
+          isLeave: false, 
+          checkinTime: '-', 
+          shift: '-' 
+      };
   };
 
   const handleCalculateReport = () => {
     if (!dateRange || dateRange.length !== 2) { message.warning('กรุณาเลือกช่วงวันที่'); return; }
     setCalculating(true);
-    const branchMap = {}; branches.forEach(b => branchMap[b.name] = b); // Map Name -> Config Object
+    
     const [start, end] = dateRange;
     const startDateStr = start.format('YYYY-MM-DD');
     const endDateStr = end.format('YYYY-MM-DD');
+    
     const filteredCheckins = checkins.filter(c => c.date >= startDateStr && c.date <= endDateStr);
     const filteredLeaves = leaves.filter(l => {
         const lStart = dayjs(l.start || l.date);
@@ -202,16 +225,38 @@ const PayrollReport = () => {
 
         while (curr.isSameOrBefore(last)) {
             const dateStr = curr.format('YYYY-MM-DD');
-            const checkinRec = filteredCheckins.find(c => c.employeeId === emp.employeeId && c.date === dateStr);
+            
+            // หาข้อมูลดิบของวันนี้
+            const checkinRecs = filteredCheckins.filter(c => c.employeeId === emp.employeeId && c.date === dateStr);
             const leaveRec = filteredLeaves.find(l => {
                 const lStart = dayjs(l.start || l.date);
                 const lEnd = dayjs(l.end || l.date);
                 return l.employeeId === emp.employeeId && curr.isBetween(lStart, lEnd, 'day', '[]');
             });
 
-            const dailyResult = calculateDailyStatus(emp, dateStr, checkinRec, leaveRec, branchMap);
+            // 🔥🔥 Logic การคัดเลือกผู้ชนะ (Winning Logic) 🔥🔥
+            // ถ้ามี Checkin หลายอัน (เช่น Auto 1 อัน + Admin ลงให้ 1 อัน)
+            let bestCheckinRec = null;
+            if (checkinRecs.length > 0) {
+                 // หาตัวที่ "Admin ลงให้ (Manual)" หรือ "มาทำงานจริง (ไม่ใช่ Auto/ขาดงาน)"
+                 const realCheckin = checkinRecs.find(c => 
+                    c.isManual === true || 
+                    (!c.isAutoAbsent && c.status !== 'ขาดงาน')
+                 );
 
-            if (dailyResult.status === 'วันหยุด' || dailyResult.status === 'ผู้บริหาร') {
+                 if (realCheckin) {
+                     // เจอตัวจริง! เอาตัวนี้เลย (ชนะขาดงาน)
+                     bestCheckinRec = realCheckin;
+                 } else {
+                     // ถ้าไม่มีตัวจริงเลย (เช่น มีแต่ Auto Absent) ก็ต้องยอมรับชะตากรรม
+                     bestCheckinRec = checkinRecs[0];
+                 }
+            }
+
+            // ส่งตัวที่คัดแล้วไปคำนวณ
+            const dailyResult = calculateDailyStatus(emp, dateStr, bestCheckinRec, leaveRec, branchMap);
+
+            if (dailyResult.status.includes('วันหยุด') || dailyResult.status === 'ผู้บริหาร') {
                 // ไม่นับ
             } else if (dailyResult.isLeave) {
                 leaveDays++;
@@ -227,12 +272,27 @@ const PayrollReport = () => {
             }
 
             if (dailyResult.isLate || dailyResult.isAbsent || dailyResult.fine > 0) {
-                details.push({ date: dateStr, ...dailyResult, branch: checkinRec ? checkinRec.branch : emp.branch });
+                details.push({ 
+                    date: dateStr, 
+                    ...dailyResult, 
+                    branch: bestCheckinRec ? bestCheckinRec.branch : emp.branch 
+                });
             }
             curr = curr.add(1, 'day');
         }
-        return { ...emp, totalLateFine, totalAbsentFine, totalDeduction: totalLateFine + totalAbsentFine, workDays, lateDays, absentDays, leaveDays, details };
+        return { 
+            ...emp, 
+            totalLateFine, 
+            totalAbsentFine, 
+            totalDeduction: totalLateFine + totalAbsentFine, 
+            workDays, 
+            lateDays, 
+            absentDays, 
+            leaveDays, 
+            details 
+        };
     });
+    
     setReportData(report);
     setCalculating(false);
     message.success("คำนวณยอดเสร็จสิ้น");
@@ -248,6 +308,7 @@ const PayrollReport = () => {
   const paginatedData = filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const onPageChange = (page, size) => { setCurrentPage(page); setPageSize(size); };
   const handleViewDetails = (record) => { setSelectedEmployee(record); setLateDetails(record.details || []); setModalVisible(true); };
+  
   const exportMainExcel = () => {
     const dataToExport = filteredData.map(item => ({
       'รหัสพนักงาน': item.employeeId, 'ชื่อ-สกุล': item.name, 'สาขา': item.branch,
@@ -265,7 +326,7 @@ const PayrollReport = () => {
     { title: 'สาขา', dataIndex: 'branch', key: 'branch' },
     { title: 'กะ', dataIndex: 'shift', key: 'shift', render: (s) => s && s !== '-' ? `กะ ${s}` : '-' },
     { title: 'เวลาเข้า', dataIndex: 'checkinTime', key: 'checkinTime' },
-    { title: 'สถานะ', dataIndex: 'status', key: 'status', render: (t) => <Tag color={t.includes('ขาด') ? 'red' : (t.includes('สาย') ? 'orange' : 'blue')}>{t}</Tag> },
+    { title: 'สถานะ', dataIndex: 'status', key: 'status', render: (t) => <Tag color={t.includes('ขาด') ? 'red' : (t.includes('สาย') ? 'orange' : (t.includes('วันหยุด') ? 'purple' : 'blue'))}>{t}</Tag> },
     { title: 'หักเงิน', dataIndex: 'fine', key: 'fine', render: (val) => <Text type="danger">{val} ฿</Text> }
   ];
 
