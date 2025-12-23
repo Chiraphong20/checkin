@@ -1,7 +1,31 @@
 const admin = require("firebase-admin");
-const serviceAccount = require("./serviceAccountKey.json"); // ตรวจสอบ path ให้ถูกต้อง
 
-// Initialize Firebase Admin (ถ้ายังไม่ได้ init ในไฟล์อื่น)
+// ---------------------------------------------------------
+// 1. ตั้งค่าการเชื่อมต่อ (Credential Setup)
+// ---------------------------------------------------------
+// ส่วนนี้แก้ปัญหา Error: Cannot find module './serviceAccountKey.json'
+let serviceAccount;
+
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  // กรณีรันบน GitHub Actions (Server) จะอ่านจาก Secret
+  try {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } catch (e) {
+    console.error("Error parsing FIREBASE_SERVICE_ACCOUNT from environment:", e);
+    process.exit(1);
+  }
+} else {
+  // กรณีรันในเครื่องตัวเอง (Local) จะอ่านจากไฟล์
+  try {
+    serviceAccount = require("./serviceAccountKey.json");
+  } catch (e) {
+    console.error("Error: ไม่พบไฟล์ serviceAccountKey.json และไม่มี Environment Variable");
+    console.error("คำแนะนำ: หากรันบน Server ต้องตั้งค่า Secret 'FIREBASE_SERVICE_ACCOUNT'");
+    process.exit(1);
+  }
+}
+
+// Initialize Firebase
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
@@ -10,98 +34,105 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+// ---------------------------------------------------------
+// 2. ฟังก์ชันหลัก (Main Logic)
+// ---------------------------------------------------------
 async function autoCutoff() {
   try {
-    // ---------------------------------------------------------
-    // 1. จัดการเรื่องเวลา (Timezone: Asia/Bangkok)
-    // ---------------------------------------------------------
-    // สร้าง Date Object ที่เป็นเวลาปัจจุบันของไทย
+    // --- ตั้งค่าเวลา (Timezone: Asia/Bangkok) ---
+    // ใช้ toLocaleString เพื่อให้แน่ใจว่าเป็นเวลาไทยเสมอ ไม่ว่า Server จะอยู่ที่ไหน
     const now = new Date();
     const thaiTimeStr = now.toLocaleString("en-US", { timeZone: "Asia/Bangkok" });
     const thaiDate = new Date(thaiTimeStr);
 
-    // สร้าง String วันที่รูปแบบ YYYY-MM-DD (ตามเวลาไทย)
+    // จัดรูปแบบวันที่ YYYY-MM-DD
     const year = thaiDate.getFullYear();
     const month = String(thaiDate.getMonth() + 1).padStart(2, '0');
     const day = String(thaiDate.getDate()).padStart(2, '0');
     const todayStr = `${year}-${month}-${day}`;
 
-    console.log(`[Auto-Cutoff] กำลังประมวลผลวันที่: ${todayStr} (Thai Time)`);
+    console.log(`[Auto-Cutoff] เริ่มประมวลผลสำหรับวันที่: ${todayStr} (เวลาไทย)`);
 
-    // ---------------------------------------------------------
-    // 2. เช็ควันหยุดเสาร์-อาทิตย์ (Weekend Check)
-    // ---------------------------------------------------------
-    const dayOfWeek = thaiDate.getDay(); // 0 = Sun, 6 = Sat
+    // --- เช็ควันเสาร์-อาทิตย์ ---
+    const dayOfWeek = thaiDate.getDay(); // 0 = อาทิตย์, 6 = เสาร์
     if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log("[Auto-Cutoff] วันนี้วันหยุดสุดสัปดาห์ (เสาร์/อาทิตย์) -> จบการทำงาน");
+      console.log("[Auto-Cutoff] วันนี้วันเสาร์/อาทิตย์ -> จบการทำงาน (ไม่เช็คขาดงาน)");
       return; 
     }
 
-    // ---------------------------------------------------------
-    // 3. เช็ควันหยุดนักขัตฤกษ์ (Holiday Check)
-    // ---------------------------------------------------------
-    // ต้องมั่นใจว่าใน DB collection 'holidays' ใช้ document ID เป็น format 'YYYY-MM-DD'
+    // --- เช็ควันหยุดนักขัตฤกษ์ (จาก Database) ---
     const holidayDoc = await db.collection("holidays").doc(todayStr).get();
     if (holidayDoc.exists) {
-      console.log(`[Auto-Cutoff] วันนี้วันหยุดนักขัตฤกษ์ (${holidayDoc.data().name || 'Unknown'}) -> จบการทำงาน`);
+      console.log(`[Auto-Cutoff] วันนี้วันหยุดนักขัตฤกษ์ (${holidayDoc.data().name}) -> จบการทำงาน`);
       return;
     }
 
     // ---------------------------------------------------------
-    // 4. ดึงข้อมูลพนักงาน และ การลงเวลาที่มีอยู่แล้ว
+    // 3. ดึงข้อมูล (Fetch Data)
     // ---------------------------------------------------------
+    // ดึงพนักงานทั้งหมดที่ยังทำงานอยู่ (status != 'ลาออก')
     const employeesSnapshot = await db.collection("employees").get();
+    
+    // ดึงรายการคนที่เช็คอินวันนี้แล้ว
     const checkinsSnapshot = await db
       .collection("employee_checkin")
       .where("date", "==", todayStr)
       .get();
     
-    // ดึงข้อมูลการลาที่ครอบคลุมวันนี้
-    // หมายเหตุ: Logic การลานี้เช็คแบบง่าย (ลาตรงวัน) 
-    // หากระบบลาเก็บเป็น range (startDate, endDate) ต้องปรับ query เพิ่มเติม
+    // ดึงรายการคนที่ลาวันนี้ (Approved)
+    // หมายเหตุ: Query นี้สำหรับกรณีลาวันเดียวจบ ถ้ามีการลาข้ามวัน (Range) อาจต้องปรับ Query เพิ่มเติม
     const leavesSnapshot = await db
       .collection("employee_leave")
-      .where("date", "==", todayStr) 
-      .where("status", "==", "Approved") // เฉพาะที่อนุมัติแล้ว
+      .where("date", "==", todayStr)
+      .where("status", "==", "Approved")
       .get();
 
-    // สร้าง Set ของ ID คนที่มาทำงานแล้ว หรือ ลาแล้ว
+    // สร้าง Set เก็บ ID ของคนที่ "รอด" (มาทำงาน หรือ ลาแล้ว)
     const activeEmployeeIds = new Set();
     
-    checkinsSnapshot.forEach((doc) => {
-      activeEmployeeIds.add(doc.data().employeeId);
-    });
-    
-    leavesSnapshot.forEach((doc) => {
-      activeEmployeeIds.add(doc.data().employeeId);
-    });
+    checkinsSnapshot.forEach((doc) => activeEmployeeIds.add(doc.data().employeeId));
+    leavesSnapshot.forEach((doc) => activeEmployeeIds.add(doc.data().employeeId));
 
     // ---------------------------------------------------------
-    // 5. หาคนที่ "ขาดงาน" และบันทึกข้อมูล
+    // 4. บันทึกคนขาดงาน (Process Absentees)
     // ---------------------------------------------------------
     const batch = db.batch();
     let absentCount = 0;
 
     employeesSnapshot.forEach((doc) => {
       const empData = doc.data();
-      const empId = doc.id; // หรือ empData.employeeId ตามโครงสร้าง DB
+      const empId = doc.id; 
 
-      // ถ้าพนักงานยัง active และ ยังไม่มีชื่อใน checkin/leave
+      // กรองเฉพาะพนักงานที่ Active (เผื่อมี flag deleted หรือ resigned)
+      // ถ้าใน DB คุณไม่มี field status ก็ข้ามบรรทัดนี้ได้
+      if (empData.status === 'Resigned' || empData.isResigned) return;
+
+      // ถ้ายังไม่มีชื่อในรายการ เช็คอิน หรือ ลา
       if (!activeEmployeeIds.has(empId)) {
         
-        // สร้าง ID ของ Document ให้ unique ตามวันและคน (ป้องกันการรันซ้ำแล้วข้อมูลเบิ้ล)
+        // สร้าง Document ID แบบระบุวัน ป้องกันการบันทึกซ้ำ
         const docId = `${empId}_${todayStr}`; 
         const checkinRef = db.collection("employee_checkin").doc(docId);
 
+        // กำหนดค่าปรับ (Logic ตาม Snippet เดิมของคุณ: แผนก 01 ไม่เสียค่าปรับ)
+        const fineAmount = (empData.department === "01") ? 0 : 500; // แก้ไข 500 เป็นยอดที่คุณต้องการ
+
         batch.set(checkinRef, {
           employeeId: empId,
-          employeeCode: empData.employeeCode || "", // เก็บเผื่อไว้แสดงผล
+          employeeCode: empData.employeeCode || "", 
           name: empData.name || "Unknown",
+          department: empData.department || "",
+          branch: empData.branch || "",
           date: todayStr,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          status: "ขาดงาน",    // สถานะที่จะไปโชว์ใน Dashboard
-          isAutoAbsent: true,  // Flag บอกว่าระบบตัดให้อัตโนมัติ
-          fine: 0,             // ค่าปรับ (ถ้ามีกฎปรับเงิน ใส่จำนวนเงินตรงนี้ เช่น 500)
+          
+          status: "ขาดงาน",    // สถานะหลัก
+          isAutoAbsent: true,  // Flag ระบบ
+          
+          checkinTime: "-",    // ใส่ขีดไว้เพื่อความสวยงามใน Table
+          checkoutTime: "-",
+          
+          fine: fineAmount,    // ค่าปรับ
           lateMinutes: 0
         });
 
@@ -110,19 +141,20 @@ async function autoCutoff() {
     });
 
     // ---------------------------------------------------------
-    // 6. Commit ลง Database
+    // 5. Commit (บันทึกลง Database)
     // ---------------------------------------------------------
     if (absentCount > 0) {
       await batch.commit();
-      console.log(`[Auto-Cutoff] บันทึกสถานะ 'ขาดงาน' สำเร็จ: ${absentCount} คน`);
+      console.log(`[Auto-Cutoff] บันทึกสถานะ 'ขาดงาน' สำเร็จจำนวน: ${absentCount} คน`);
     } else {
-      console.log("[Auto-Cutoff] ไม่มีพนักงานขาดงานในวันนี้ (ครบทุกคน หรือ ลาหมด)");
+      console.log("[Auto-Cutoff] ยอดเยี่ยม! วันนี้ไม่มีใครขาดงาน (หรือมีข้อมูลครบแล้ว)");
     }
 
   } catch (error) {
-    console.error("[Auto-Cutoff] Error:", error);
+    console.error("[Auto-Cutoff] Fatal Error:", error);
+    process.exit(1); // ส่ง exit code 1 เพื่อให้ GitHub Actions แจ้งเตือนว่า Failed
   }
 }
 
-// เรียกใช้งานฟังก์ชัน
+// เรียกทำงาน
 autoCutoff();
