@@ -2,16 +2,12 @@ name: Daily Absent Cutoff
 
 on:
   schedule:
-    # 1. รันตอนเช้า (03:00 UTC = 10:00 น. ไทย) เผื่อบางองค์กรใช้เวลาเช้า
-    - cron: '0 3 * * *' 
+    # รันตอน 10:00 UTC ซึ่งตรงกับ "17:00 น. ประเทศไทย"
+    # ระบบจะตื่นมาเช็คว่าใครยังไม่เช็คอิน แล้วปรับเป็น "ขาดงาน" ทันที
+    - cron: '0 10 * * *'
     
-    # 2. รันทุก 30 นาที ในช่วงบ่ายถึงเย็น (08:00 - 13:00 UTC)
-    # 💡 ช่วงนี้ครอบคลุมเวลา 15:00 น. ถึง 20:00 น. ไทย
-    # การรันถี่ ๆ จะทำให้ระบบตัดยอดตามเวลา 17:00 น. ใน Setting Page ได้ "ทันที" เมื่อถึงเกณฑ์
-    - cron: '0,30 8-13 * * *' 
-    
-  workflow_dispatch: # เพื่อให้คุณกดรันด้วยมือเพื่อทดสอบได้
-# ----------------------------------------------------------------------
+  # เก็บไว้เพื่อให้คุณกดรันด้วยมือ (Manual Trigger) ได้ตอนทดสอบ
+  workflow_dispatch:
 
 jobs:
   cutoff:
@@ -30,6 +26,6 @@ jobs:
 
       - name: Run Cutoff Script
         env:
-          # ดึง Secret Key เพื่อเชื่อมต่อ Firebase
+          # ดึง Secret Key จาก GitHub Settings เพื่อเชื่อมต่อ Firebase
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/auto-cutoff.js
