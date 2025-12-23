@@ -292,11 +292,10 @@ export default function LeaveBalance() {
           return count;
         };
 
+        // --- Logic การคำนวณยอดวันลา ---
         if (isOffice) {
-          // Office: เสาร์ + อาทิตย์ + นักขัตฤกษ์ (myHolidaysDates already includes all for Office)
-          monthlyQuota = countWeekends(dayjs());
-          // เพิ่มจำนวนวันหยุดนักขัตฤกษ์ในเดือนนี้ (myHolidaysDates คำนวณข้างบน)
-          monthlyQuota += holidaysInMonth;
+          // 1. คำนวณวันหยุดทั้งหมดของเดือน (เสาร์-อาทิตย์ + นักขัตฤกษ์)
+          monthlyQuota = countWeekends(dayjs()) + holidaysInMonth;
           
           // 2. คำนวณวันหยุดที่ใช้ไปแล้ว (จากการลาจริงๆ)
           const actualLeaves = allRecords.filter(r => {
@@ -334,6 +333,7 @@ export default function LeaveBalance() {
           usedMonth = actualLeaves + passedDaysOff;
 
         } else {
+          // Sales/Transport Logic (เหมือนเดิม)
           const currentMonthIndex = dayjs().month();
           monthlyQuota = (currentMonthIndex === 1) ? 4 : 5;
           usedMonth = allRecords.filter(r => {
