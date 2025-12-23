@@ -215,19 +215,57 @@ const Dashboard = () => {
     return [...checkins, ...leaveRecords];
   }, [checkins, leaves, employees]);
 
+  // ---------------------------------------------------------
+  // ✅ แก้ไข: เพิ่ม Logic การคัดกรองข้อมูลซ้ำ (Priority)
+  // ---------------------------------------------------------
   const processedCheckins = useMemo(() => {
     const today = dayjs();
-    let data = selectedBranch === "ทั้งหมด" ? mergedCheckins : mergedCheckins.filter((c) => branchEmployeeIds.has(c.employeeId));
+    
+    // 1. กรองตามสาขา
+    let data = selectedBranch === "ทั้งหมด" 
+      ? mergedCheckins 
+      : mergedCheckins.filter((c) => branchEmployeeIds.has(c.employeeId));
 
-    return data
-      .filter((item) => {
+    // 2. กรองตามช่วงเวลา
+    data = data.filter((item) => {
         const itemDate = dayjs(item.date, "YYYY-MM-DD");
         if (selectedRange === "today") return itemDate.isSame(today, "day");
         if (selectedRange === "7days") return (itemDate.isAfter(today.subtract(7, "day")) || itemDate.isSame(today, "day"));
         if (selectedRange === "month") return itemDate.isSame(today, "month");
         return true;
-      })
-      .map((item) => {
+      });
+
+    // 3. Logic: ลบข้อมูลซ้ำ (ถ้ามีทั้ง 'ขาดงาน' และ 'ลา' ให้เอา 'ลา')
+    const dedupedMap = new Map();
+    
+    data.forEach((item) => {
+      const key = `${item.employeeId}_${item.date}`;
+      
+      if (!dedupedMap.has(key)) {
+        dedupedMap.set(key, item);
+      } else {
+        const existing = dedupedMap.get(key);
+        
+        // เช็ค Priority
+        const isExistingAutoAbsent = existing.isAutoAbsent || existing.status === 'ขาดงาน';
+        const isNewItemLeave = item.__isLeave;
+        const isNewItemCheckin = item.checkinTime !== "-" && !item.isAutoAbsent;
+
+        // ถ้าของเดิมเป็น Auto Absent แต่ของใหม่เป็น 'ลา' หรือ 'มาทำงานจริง' -> ให้ทับของเดิม
+        if (isExistingAutoAbsent && (isNewItemLeave || isNewItemCheckin)) {
+          dedupedMap.set(key, item);
+        }
+        // ถ้าของเดิมเป็น 'ลา' แต่ของใหม่เป็น 'มาทำงานจริง' (เผื่อกรณีลาแล้วมา) -> ให้ทับด้วยการมาทำงาน
+        else if (existing.__isLeave && isNewItemCheckin) {
+           dedupedMap.set(key, item);
+        }
+      }
+    });
+
+    const uniqueData = Array.from(dedupedMap.values());
+
+    // 4. จัดรูปแบบสุดท้าย
+    return uniqueData.map((item) => {
         const emp = employees.find((e) => e.employeeId === item.employeeId);
         let status = item.status;
         if (!item.__isLeave && emp) {
