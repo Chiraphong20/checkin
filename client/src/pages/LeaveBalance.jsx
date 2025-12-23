@@ -238,13 +238,15 @@ export default function LeaveBalance() {
         const leavesSnap = await getDocs(leaveQuery);
         const leaves = leavesSnap.docs.map(d => d.data());
 
+        // --- กรองประวัติการลาและการเช็คอิน ---
         let allRecords = [];
         checkIns.forEach(item => {
           const isOff = item.status && (item.status.includes("หยุด") || item.status.includes("ขาด") || item.status.includes("สายมา") || item.status.includes("ลา"));
           if (isOff && item.date.startsWith(currentYear)) {
+             // ถ้าเป็น Office (02) แล้วขึ้นขาดงานในวันหยุด -> ไม่ต้องแสดง
              if (empData.department === "02" && item.status === "ขาดงาน") {
                  const d = dayjs(item.date);
-                 const isWeekend = d.day() === 0 || d.day() === 6; 
+                 const isWeekend = d.day() === 0 || d.day() === 6;
                  const isPublicHoliday = myHolidaysDates.includes(item.date);
                  if (isWeekend || isPublicHoliday) return;
              }
@@ -290,10 +292,11 @@ export default function LeaveBalance() {
           return count;
         };
 
-        // --- Logic การคำนวณยอดวันลา ---
         if (isOffice) {
-          // 1. คำนวณวันหยุดทั้งหมดของเดือน (เสาร์-อาทิตย์ + นักขัตฤกษ์)
-          monthlyQuota = countWeekends(dayjs()) + holidaysInMonth;
+          // Office: เสาร์ + อาทิตย์ + นักขัตฤกษ์ (myHolidaysDates already includes all for Office)
+          monthlyQuota = countWeekends(dayjs());
+          // เพิ่มจำนวนวันหยุดนักขัตฤกษ์ในเดือนนี้ (myHolidaysDates คำนวณข้างบน)
+          monthlyQuota += holidaysInMonth;
           
           // 2. คำนวณวันหยุดที่ใช้ไปแล้ว (จากการลาจริงๆ)
           const actualLeaves = allRecords.filter(r => {
@@ -331,7 +334,6 @@ export default function LeaveBalance() {
           usedMonth = actualLeaves + passedDaysOff;
 
         } else {
-          // Sales/Transport Logic (เหมือนเดิม)
           const currentMonthIndex = dayjs().month();
           monthlyQuota = (currentMonthIndex === 1) ? 4 : 5;
           usedMonth = allRecords.filter(r => {
@@ -380,6 +382,7 @@ export default function LeaveBalance() {
   const departmentName = departments.find((d) => d.code === employee.department)?.name || "-";
   const totalAvailable = leaveData.monthlyQuota + leaveData.accumulatedQuota;
   const percent = totalAvailable > 0 ? (leaveData.usedLeaveMonth / totalAvailable) * 100 : 0;
+
   const filteredHolidays = allPublicHolidays.filter(h => h.date && h.date.startsWith(selectedYear.toString()));
   const availableYears = [...new Set(allPublicHolidays.map(h => h.date ? dayjs(h.date).year() : null).filter(Boolean))].sort((a, b) => b - a);
   const combinedPercent = leaveData.combinedLimit.max > 0 ? (leaveData.combinedLimit.used / leaveData.combinedLimit.max) * 100 : 0;
