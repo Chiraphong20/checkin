@@ -5,7 +5,7 @@ import {
 import { 
   UserOutlined, CalendarOutlined, FileTextOutlined, ClockCircleOutlined, 
   FieldTimeOutlined, CrownOutlined, WarningOutlined, RightOutlined, 
-  CheckCircleFilled, CloseCircleFilled, HistoryOutlined
+  CheckCircleFilled, CloseCircleFilled, HistoryOutlined, EyeOutlined
 } from "@ant-design/icons";
 import liff from "@line/liff";
 import { db } from "../firebase";
@@ -23,7 +23,7 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 
 // --- Components ย่อย ---
-const StatCard = ({ title, value, total, unit, color, icon, subtext }) => (
+const StatCard = ({ title, value, total, unit, color, icon, subtext, onDetailClick }) => (
   <div style={{ 
     background: '#fff', 
     borderRadius: '20px', 
@@ -53,6 +53,24 @@ const StatCard = ({ title, value, total, unit, color, icon, subtext }) => (
           <Text style={{ fontSize: '14px', color: '#888' }}>{unit}</Text>
         </div>
         {subtext && <Text style={{ fontSize: '12px', color: color, marginTop: 4, display: 'block' }}>{subtext}</Text>}
+        
+        {/* เพิ่มปุ่มดูรายละเอียดถ้ามี onDetailClick */}
+        {onDetailClick && (
+          <div 
+            onClick={onDetailClick} 
+            style={{ 
+              marginTop: 8, 
+              fontSize: '12px', 
+              color: '#1890ff', 
+              cursor: 'pointer', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 4 
+            }}
+          >
+            <EyeOutlined /> ดูรายละเอียด
+          </div>
+        )}
       </div>
       
       {total !== undefined && total > 0 && (
@@ -131,6 +149,10 @@ export default function LeaveBalance() {
   const [allPublicHolidays, setAllPublicHolidays] = useState([]);
   const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
   const [selectedYear, setSelectedYear] = useState(dayjs().year());
+  
+  // เพิ่ม State สำหรับรายการวันที่ใช้หยุดประจำเดือน
+  const [monthlyUsageList, setMonthlyUsageList] = useState([]);
+  const [isMonthlyUsageModalOpen, setIsMonthlyUsageModalOpen] = useState(false);
 
   const calculateWorkDuration = (startDate) => {
     if (!startDate) return { years: 0, months: 0, days: 0 };
@@ -280,6 +302,7 @@ export default function LeaveBalance() {
         const annualUsedTotal = allRecords.filter(r => r.status && r.status.includes("พักร้อน") && r.leaveStatus === 'Approved').length;
 
         let monthlyQuota = 0, accumulatedQuota = 0, usedMonth = 0, combinedMax = 0, combinedUsed = 0;
+        let monthlyUsageDetails = []; // เก็บรายละเอียดวันที่ใช้ไป
 
         const countWeekends = (month) => {
           let count = 0;
@@ -298,16 +321,22 @@ export default function LeaveBalance() {
           monthlyQuota = countWeekends(dayjs()) + holidaysInMonth;
           
           // 2. คำนวณวันหยุดที่ใช้ไปแล้ว (จากการลาจริงๆ)
-          const actualLeaves = allRecords.filter(r => {
+          allRecords.forEach(r => {
             const isThisMonth = r.date.startsWith(currentMonthStr);
             const isHoliday = myHolidaysDates.includes(r.date);
             const isVacation = r.status.includes("พักร้อน");
-            return isThisMonth && !isHoliday && !isVacation;
-          }).length;
+            
+            if (isThisMonth && !isHoliday && !isVacation) {
+                monthlyUsageDetails.push({
+                    date: r.date,
+                    reason: `ลา/หยุด (${r.status})`,
+                    type: 'leave'
+                });
+            }
+          });
 
           // 3. ✅ คำนวณวันหยุดที่ "ผ่านไปแล้ว" (Passed Days)
           // เพื่อให้ยอดคงเหลือลดลงตามเวลาจริง
-          let passedDaysOff = 0;
           const startOfMonth = dayjs().startOf('month');
           // นับถึงเมื่อวาน (เพราะวันนี้ยังไม่หมดวัน)
           const yesterday = dayjs().subtract(1, 'day');
@@ -323,28 +352,43 @@ export default function LeaveBalance() {
                   // เช็คว่าวันนั้นไม่ได้มีการลาซ้ำซ้อน (ถ้าลาแล้ว จะถูกนับใน actualLeaves ไปแล้ว)
                   const alreadyTaken = allRecords.some(r => r.date === dStr);
                   if (!alreadyTaken) {
-                      passedDaysOff++;
+                      monthlyUsageDetails.push({
+                          date: dStr,
+                          reason: isWeekend ? "วันหยุดเสาร์-อาทิตย์" : "วันหยุดนักขัตฤกษ์",
+                          type: 'holiday'
+                      });
                   }
               }
               curr = curr.add(1, 'day');
           }
 
-          // ยอดใช้ไปทั้งหมด = ลาจริง + วันหยุดที่ผ่านไปแล้ว
-          usedMonth = actualLeaves + passedDaysOff;
+          // เรียงวันที่จากใหม่ไปเก่า
+          monthlyUsageDetails.sort((a, b) => b.date.localeCompare(a.date));
+          usedMonth = monthlyUsageDetails.length;
 
         } else {
           // Sales/Transport Logic (เหมือนเดิม)
           const currentMonthIndex = dayjs().month();
           monthlyQuota = (currentMonthIndex === 1) ? 4 : 5;
-          usedMonth = allRecords.filter(r => {
+          
+          allRecords.forEach(r => {
             const isThisMonth = r.date.startsWith(currentMonthStr);
             const isHoliday = myHolidaysDates.includes(r.date);
             const isVacation = r.status.includes("พักร้อน");
             const isCompensatory = r.status.includes("หยุดชดเชย");
             const isSick = r.status.includes("ลาป่วย");
             const isPersonal = r.status.includes("ลากิจ");
-            return isThisMonth && !isHoliday && !isVacation && !isCompensatory && !isSick && !isPersonal;
-          }).length;
+            
+            if (isThisMonth && !isHoliday && !isVacation && !isCompensatory && !isSick && !isPersonal) {
+                monthlyUsageDetails.push({
+                    date: r.date,
+                    reason: `หยุดประจำเดือน (${r.status})`,
+                    type: 'leave'
+                });
+            }
+          });
+          
+          usedMonth = monthlyUsageDetails.length;
 
           combinedMax = (currentMonthIndex === 1) ? 9 : 10;
           const usedVacationThisMonth = allRecords.filter(r => r.date.startsWith(currentMonthStr) && r.status.includes("พักร้อน")).length;
@@ -365,6 +409,7 @@ export default function LeaveBalance() {
         });
 
         setHistoryList(history);
+        setMonthlyUsageList(monthlyUsageDetails); // เก็บรายละเอียดวันที่ใช้
         setLoading(false);
       } catch (err) {
         console.error(err);
@@ -446,7 +491,7 @@ export default function LeaveBalance() {
           </div>
         )}
 
-        {/* 1. Monthly Quota Card */}
+        {/* 1. Monthly Quota Card (เพิ่มปุ่มกดดูรายละเอียด) */}
         <StatCard 
           title={leaveData.isPrivileged ? "วันหยุดประจำเดือน" : "หยุดประจำเดือน"}
           icon={<CalendarOutlined />}
@@ -455,6 +500,7 @@ export default function LeaveBalance() {
           total={leaveData.monthlyQuota + leaveData.accumulatedQuota}
           unit="วันคงเหลือ"
           subtext={`ใช้ไปแล้ว ${leaveData.usedLeaveMonth} วัน`}
+          onDetailClick={() => setIsMonthlyUsageModalOpen(true)} // ✅ เพิ่ม Event Click
         />
 
         {/* 2. Annual Leave Card */}
@@ -502,6 +548,38 @@ export default function LeaveBalance() {
           ปิดหน้าต่าง
         </Button>
       </div>
+
+      {/* --- Modal แสดงวันหยุดประจำเดือนที่ใช้ไป --- */}
+      <Modal
+        title="รายละเอียดการใช้วันหยุด"
+        open={isMonthlyUsageModalOpen}
+        onCancel={() => setIsMonthlyUsageModalOpen(false)}
+        footer={null}
+        centered
+        bodyStyle={{ maxHeight: '60vh', overflowY: 'auto', padding: '0 20px' }}
+      >
+        <List
+          itemLayout="horizontal"
+          dataSource={monthlyUsageList}
+          locale={{ emptyText: 'ยังไม่มีการใช้วันหยุด' }}
+          renderItem={(item) => (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ 
+                  background: item.type === 'holiday' ? '#F0F5FF' : '#FFF7E6', 
+                  padding: 8, borderRadius: '50%', color: item.type === 'holiday' ? '#2F54EB' : '#FA8C16'
+                }}>
+                  {item.type === 'holiday' ? <CalendarOutlined /> : <UserOutlined />}
+                </div>
+                <div>
+                  <Text strong style={{ display: 'block' }}>{dayjs(item.date).format("D MMM YYYY")}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{item.reason}</Text>
+                </div>
+              </div>
+            </div>
+          )}
+        />
+      </Modal>
 
       {/* --- Modal ประวัติ --- */}
       <Modal
