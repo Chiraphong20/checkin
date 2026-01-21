@@ -115,7 +115,7 @@ async function autoCutoff() {
         const checkinRef = db.collection("employee_checkin").doc(docId);
 
         // กำหนดค่าปรับ (Logic ตาม Snippet เดิมของคุณ: แผนก 01 ไม่เสียค่าปรับ)
-        const fineAmount = (empData.department === "01") ? 0 : 500; // แก้ไข 500 เป็นยอดที่คุณต้องการ
+        const fineAmount = (empData.department === "01") ? 0 : 50; // แก้ไข 500 เป็นยอดที่คุณต้องการ
 
         batch.set(checkinRef, {
           employeeId: empId,
