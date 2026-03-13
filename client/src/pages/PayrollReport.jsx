@@ -281,6 +281,7 @@ const PayrollReport = () => {
                 date: dateStr,
                 employeeId: emp.employeeId,
                 name: emp.name,
+                nickname: emp.nickname || "",
                 branch: emp.branch,
                 department: emp.department,
                 shift: dailyResult.shift,
@@ -332,7 +333,9 @@ const PayrollReport = () => {
   };
 
   const filteredData = reportData.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchText.toLowerCase()) || 
+    const searchLower = searchText.toLowerCase();
+    const matchesSearch = item.name.toLowerCase().includes(searchLower) || 
+                          (item.nickname && item.nickname.toLowerCase().includes(searchLower)) ||
                           (item.employeeId && item.employeeId.toString().includes(searchText));
     const matchesBranch = selectedBranch === "ทั้งหมด" || item.branch === selectedBranch;
     return matchesSearch && matchesBranch;
@@ -356,6 +359,7 @@ const PayrollReport = () => {
     const dataToExport = filteredData.map(item => ({
       'รหัสพนักงาน': item.employeeId,
       'ชื่อ-สกุล': item.name,
+      'ชื่อเล่น': item.nickname || "",
       'สาขา': item.branch,
       'มาทำงาน (วัน)': item.workDays,
       'มาสาย (ครั้ง)': item.lateDays,
@@ -386,6 +390,7 @@ const PayrollReport = () => {
           'วันที่': row.date,
           'รหัสพนักงาน': row.employeeId,
           'ชื่อ-สกุล': row.name,
+          'ชื่อเล่น': row.nickname || "",
           'สาขา': row.branch,
           'แผนก': row.department,
           'กะ': row.shift,
@@ -412,6 +417,7 @@ const PayrollReport = () => {
   const columns = [
     { title: 'รหัส', dataIndex: 'employeeId', key: 'employeeId', width: 80, align: 'center' },
     { title: 'ชื่อ-สกุล', dataIndex: 'name', key: 'name' },
+    { title: 'ชื่อเล่น', dataIndex: 'nickname', key: 'nickname', width: 100, align: 'center', render: (val) => val ? val : "-" },
     { title: 'สาขา', dataIndex: 'branch', key: 'branch', width: 120 },
     { 
         title: 'สถิติการมา', 
@@ -462,7 +468,7 @@ const PayrollReport = () => {
               {branchOptions.map(b => <Option key={b} value={b}>{b}</Option>)}
           </Select>
           <Input 
-            placeholder="ค้นหาชื่อพนักงาน..." 
+            placeholder="ค้นหาชื่อ, ชื่อเล่นพนักงาน..." 
             prefix={<SearchOutlined />} 
             value={searchText}
             onChange={e => setSearchText(e.target.value)}

@@ -140,18 +140,22 @@ const departmentMap = {
               <Text strong style={{ marginBottom: 4, display: 'block' }}>ชื่อพนักงาน</Text>
               <Select
                 showSearch
-                placeholder="พิมพ์ชื่อเพื่อค้นหา..."
-                optionFilterProp="children"
+                placeholder="พิมพ์ชื่อหรือชื่อเล่นเพื่อค้นหา..."
                 size="large"
                 style={{ width: "100%", marginBottom: 16 }}
                 onChange={(v) => setSelectedEmp(v)}
                 filterOption={(input, option) =>
-                    option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                    (option?.children ?? "").toLowerCase().includes(input.toLowerCase()) ||
+                    (option?.['data-nickname'] ?? "").toLowerCase().includes(input.toLowerCase())
                 }
               >
                 {employees.map((emp) => (
-                  <Option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.employeeId})
+                  <Option 
+                    key={emp.id} 
+                    value={emp.id}
+                    data-nickname={emp.nickname || ""}
+                  >
+                    {emp.name} {emp.nickname ? `(${emp.nickname})` : ""} [{emp.employeeId}]
                   </Option>
                 ))}
               </Select>

@@ -239,6 +239,7 @@ export default function AdminManualCheckIn() {
           key: emp.employeeId,
           employeeId: emp.employeeId,
           name: emp.name,
+          nickname: emp.nickname || "",
           department: emp.department || "-",
           defaultBranch: emp.branch || (emp.branches ? emp.branches[0] : "-"),
           
@@ -380,6 +381,7 @@ export default function AdminManualCheckIn() {
     const query = searchText.toLowerCase();
     return (
         item.name?.toLowerCase().includes(query) || 
+        item.nickname?.toLowerCase().includes(query) ||
         item.employeeId?.toLowerCase().includes(query) || 
         item.department?.toLowerCase().includes(query)
     );
@@ -397,6 +399,14 @@ export default function AdminManualCheckIn() {
           <div style={{ fontSize: '12px', color: '#888' }}>{record.employeeId}</div>
         </div>
       )
+    },
+    {
+      title: "ชื่อเล่น",
+      dataIndex: "nickname",
+      key: "nickname",
+      width: 100,
+      align: 'center',
+      render: (nickname) => nickname ? nickname : "-"
     },
     {
         title: "กะ", 
@@ -475,11 +485,11 @@ export default function AdminManualCheckIn() {
           <Col>
             <Space>
               <Input 
-                 placeholder="ค้นหาชื่อ / รหัส" 
+                 placeholder="ค้นหาชื่อ, ชื่อเล่น / รหัส" 
                  prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
                  value={searchText}
                  onChange={(e) => setSearchText(e.target.value)}
-                 style={{ width: 200 }}
+                 style={{ width: 220 }}
                  allowClear
               />
 

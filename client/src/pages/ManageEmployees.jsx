@@ -88,6 +88,7 @@ const ManageEmployees = () => {
       const text = searchValue.toLowerCase();
       filtered = filtered.filter(emp =>
         emp.name?.toLowerCase().includes(text) ||
+        (emp.nickname && emp.nickname.toLowerCase().includes(text)) ||
         emp.employeeId?.toLowerCase().includes(text)
       );
     }
@@ -310,7 +311,7 @@ const ManageEmployees = () => {
       <Card style={{ marginBottom: 16 }}>
         <Space style={{ marginBottom: 16 }}>
           <Search
-            placeholder="ค้นหาชื่อหรือรหัสพนักงาน"
+            placeholder="ค้นหาชื่อ, ชื่อเล่น, หรือรหัสพนักงาน"
             allowClear
             onChange={handleSearchChange}
             style={{ width: 250 }}
