@@ -37,7 +37,7 @@ import {
   InfoCircleOutlined,
   FilterOutlined
 } from "@ant-design/icons";
-import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, orderBy, query, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { nanoid } from "nanoid";
 import dayjs from "dayjs";
@@ -141,73 +141,83 @@ export default function EmployeeLeaveDashboard() {
     fetchMasterData();
   }, []);
 
-  const fetchData = async () => {
+  const [leaveDocs, setLeaveDocs] = useState([]);
+
+  // Real-time listeners: propagate changes from any page (e.g. adcheckin) immediately.
+  useEffect(() => {
     setLoading(true);
-    try {
-      const leaveSnap = await getDocs(collection(db, "employee_leave"));
-      const qHoliday = query(collection(db, "public_holidays"), orderBy("date", "asc"));
-      const holidaySnap = await getDocs(qHoliday);
-
-      const holidaysData = holidaySnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-      }));
-      setHolidaysList(holidaysData);
-
-      const holidayEvents = holidaysData.map(h => ({
-        id: h.id,
-        title: `🔴 ${h.title}`,
-        start: h.date,
-        allDay: true,
-        backgroundColor: "#fff1f0", 
-        borderColor: "#ffccc7",
-        textColor: "#cf1322",       
-        display: "background",      
-        extendedProps: { 
-            isHoliday: true, 
-            title: h.title, 
-            dbId: h.id,
-            targetBranches: h.targetBranches || "ALL",
-            allowSales: h.allowSales || false
-        }
-      }));
-      
-      const leaveEvents = leaveSnap.docs.map((docItem) => {
-        const d = docItem.data();
-        const emp = employees.find((e) => e.employeeId === d.employeeId);
-        const type = d.type || "ลากิจ";
-        const color = getEventColor(type, false);
-        const displayName = emp ? (emp.nickname || emp.name) : "Unknown";
-
-        return {
-          id: d.eventId || docItem.id,
-          title: `${displayName} (${type})`,
-          start: d.date,
-          backgroundColor: color,
-          borderColor: "transparent",
-          textColor: "#fff",
-          extendedProps: {
-            dbId: docItem.id,
-            employeeId: d.employeeId,
-            type: type,
-            status: d.status || "Pending",
-            isHoliday: false
-          },
-        };
-      });
-
-      setEvents([...holidayEvents, ...leaveEvents]);
-    } catch (err) {
+    const qHoliday = query(collection(db, "public_holidays"), orderBy("date", "asc"));
+    const unsubHoliday = onSnapshot(qHoliday, (holidaySnap) => {
+      setHolidaysList(holidaySnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
       console.error(err);
-      message.error("โหลดข้อมูลไม่สำเร็จ");
-    } finally {
-      setLoading(false);
-    }
-  };
+      message.error("โหลดข้อมูลวันหยุดไม่สำเร็จ");
+    });
+
+    const unsubLeave = onSnapshot(collection(db, "employee_leave"), (leaveSnap) => {
+      setLeaveDocs(leaveSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.error(err);
+      message.error("โหลดข้อมูลการลาไม่สำเร็จ");
+    });
+
+    return () => {
+      unsubHoliday();
+      unsubLeave();
+    };
+  }, []);
 
   useEffect(() => {
-    if (employees.length > 0) fetchData();
-  }, [employees]);
+    if (employees.length === 0) return;
+
+    const holidayEvents = holidaysList.map(h => ({
+      id: h.id,
+      title: `🔴 ${h.title}`,
+      start: h.date,
+      allDay: true,
+      backgroundColor: "#fff1f0",
+      borderColor: "#ffccc7",
+      textColor: "#cf1322",
+      display: "background",
+      extendedProps: {
+          isHoliday: true,
+          title: h.title,
+          dbId: h.id,
+          targetBranches: h.targetBranches || "ALL",
+          allowSales: h.allowSales || false
+      }
+    }));
+
+    const leaveEvents = leaveDocs.map((d) => {
+      const emp = employees.find((e) => e.employeeId === d.employeeId);
+      const type = d.type || "ลากิจ";
+      const color = getEventColor(type, false);
+      const displayName = emp ? (emp.nickname || emp.name) : "Unknown";
+
+      return {
+        id: d.eventId || d.id,
+        title: `${displayName} (${type})`,
+        start: d.date,
+        backgroundColor: color,
+        borderColor: "transparent",
+        textColor: "#fff",
+        extendedProps: {
+          dbId: d.id,
+          employeeId: d.employeeId,
+          type: type,
+          status: d.status || "Pending",
+          isHoliday: false
+        },
+      };
+    });
+
+    // Preserve unsaved draft events (created via date-range select, not yet persisted).
+    setEvents(prev => {
+      const draftEvents = prev.filter(ev => !ev.extendedProps.dbId && !ev.extendedProps.isHoliday);
+      return [...holidayEvents, ...leaveEvents, ...draftEvents];
+    });
+    setLoading(false);
+  }, [holidaysList, leaveDocs, employees]);
 
   const resetHolidayForm = () => {
       setNewHolidayRange(null);
@@ -244,7 +254,6 @@ export default function EmployeeLeaveDashboard() {
           await Promise.all(promises);
           message.success("เพิ่มวันหยุดเรียบร้อย");
           resetHolidayForm();
-          fetchData(); 
       } catch (e) {
           message.error("เพิ่มวันหยุดไม่สำเร็จ");
       } finally {
@@ -267,7 +276,6 @@ export default function EmployeeLeaveDashboard() {
           });
           message.success("แก้ไขวันหยุดเรียบร้อย");
           resetHolidayForm();
-          fetchData();
       } catch (e) {
           message.error("แก้ไขไม่สำเร็จ");
       } finally {
@@ -288,7 +296,6 @@ export default function EmployeeLeaveDashboard() {
           await deleteDoc(doc(db, "public_holidays", id));
           message.success("ลบวันหยุดแล้ว");
           if (editingHolidayId === id) resetHolidayForm();
-          fetchData();
       } catch (e) {
           message.error("ลบไม่สำเร็จ");
       }
@@ -414,7 +421,6 @@ export default function EmployeeLeaveDashboard() {
       });
       await Promise.all(promises);
       message.success("บันทึกข้อมูลเรียบร้อย");
-      fetchData();
       setSelectedEmployees([]);
     } catch (err) {
       message.error("บันทึกไม่สำเร็จ");
@@ -435,7 +441,6 @@ export default function EmployeeLeaveDashboard() {
           status: editStatus,
         });
         message.success("อัปเดตข้อมูลสำเร็จ");
-        fetchData();
       } catch (err) {
         message.error("อัปเดตไม่สำเร็จ");
       }

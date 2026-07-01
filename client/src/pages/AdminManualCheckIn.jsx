@@ -31,12 +31,20 @@ import {
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
 import { db } from "../firebase";
-import { collection, getDocs, query, where, doc, updateDoc, addDoc, getDoc } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, updateDoc, addDoc, getDoc, deleteDoc } from "firebase/firestore";
 
 dayjs.extend(isBetween);
 
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+// สถานะที่ถือเป็นการลา/หยุด -> ต้อง sync ไปยัง collection employee_leave เพื่อให้ปฏิทินหน้า Leave แสดงผลตรงกัน
+const leaveStatusTypeMap = {
+  "วันหยุด": "หยุด",
+  "ลากิจ": "ลากิจ",
+  "ลาป่วย": "ลาป่วย",
+  "พักร้อน": "พักร้อน",
+};
 
 // Helper แปลงเวลา
 const timeToMinutes = (timeStr) => {
@@ -328,6 +336,41 @@ export default function AdminManualCheckIn() {
     });
   };
 
+  // ซิงก์สถานะลา/หยุดไปยัง collection employee_leave เพื่อให้ปฏิทินหน้า Leave อัปเดตตาม
+  const syncLeaveRecord = async (dateStr, status) => {
+    const leaveType = leaveStatusTypeMap[status];
+
+    const existingSnap = await getDocs(
+      query(
+        collection(db, "employee_leave"),
+        where("employeeId", "==", currentRecord.employeeId),
+        where("date", "==", dateStr)
+      )
+    );
+
+    if (leaveType) {
+      const leaveData = {
+        employeeId: currentRecord.employeeId,
+        employeeName: currentRecord.name,
+        date: dateStr,
+        type: leaveType,
+        status: "Approved",
+      };
+
+      if (!existingSnap.empty) {
+        await updateDoc(doc(db, "employee_leave", existingSnap.docs[0].id), leaveData);
+      } else {
+        await addDoc(collection(db, "employee_leave"), {
+          ...leaveData,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } else if (!existingSnap.empty) {
+      // เปลี่ยนสถานะกลับเป็นมาทำงานปกติ -> ลบใบลาที่เคย sync ไว้
+      await Promise.all(existingSnap.docs.map((d) => deleteDoc(doc(db, "employee_leave", d.id))));
+    }
+  };
+
   const handleSave = async (values) => {
     try {
       setLoading(true);
@@ -360,11 +403,13 @@ export default function AdminManualCheckIn() {
           employeeId: currentRecord.employeeId,
           name: currentRecord.name,
           department: currentRecord.department,
-          lineUserId: "", 
+          lineUserId: "",
           phone: ""
         });
         message.success("สร้างรายการใหม่เรียบร้อย");
       }
+
+      await syncLeaveRecord(dateStr, values.status);
 
       setIsModalOpen(false);
       fetchDailyData(selectedDate);
