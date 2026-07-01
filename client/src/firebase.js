@@ -5,13 +5,13 @@ import { getAuth } from "firebase/auth";
 
 // 🔧 ใส่ config ของคุณจาก Firebase Console ตรงนี้
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId:     import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey: "AIzaSyCdFTEgmZqcY5LwCVLJkUa51fqJa7JwETg",
+  authDomain: "checkin-16f25.firebaseapp.com",
+  projectId: "checkin-16f25",
+  storageBucket: "checkin-16f25.firebasestorage.app",
+  messagingSenderId: "763468433243",
+  appId: "1:763468433243:web:6c9621b7937d334489bc7e",
+  measurementId: "G-996KVTYR9P"
 };
 
 // ✅ Initialize Firebase
@@ -24,4 +24,3 @@ const auth = getAuth(app);
 // ✅ export ตัวแปรออกไปให้ไฟล์อื่นใช้
 export { db, auth,app };
 // ✅ export ทั้ง app และ db
-
