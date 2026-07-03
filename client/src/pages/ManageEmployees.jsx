@@ -5,9 +5,10 @@ import {
 } from 'antd';
 import {
   UserAddOutlined, EditOutlined, DeleteOutlined,
-  SearchOutlined
+  SearchOutlined, FileExcelOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
 import {
   collection, getDocs, setDoc, updateDoc, deleteDoc, doc
 } from "firebase/firestore";
@@ -258,6 +259,34 @@ const ManageEmployees = () => {
     }
   };
 
+  // Export ข้อมูลพนักงาน (ตามรายการที่กรองอยู่บนตาราง) เป็น Excel
+  const handleExportExcel = () => {
+    if (filteredEmployees.length === 0) {
+      message.warning("ไม่มีข้อมูลพนักงานให้ Export");
+      return;
+    }
+
+    const dataToExport = filteredEmployees.map(emp => {
+      const branchList = Array.isArray(emp.branches)
+        ? emp.branches
+        : (emp.branch ? [emp.branch] : []);
+      return {
+        'รหัสพนักงาน': emp.employeeId,
+        'ชื่อ - สกุล': emp.name,
+        'ชื่อเล่น': emp.nickname || '',
+        'แผนก': departments.find(d => d.code === emp.department)?.name || emp.department,
+        'สาขา': branchList.length > 0 ? branchList.join(', ') : '-',
+        'เบอร์โทร': emp.phone || '',
+        'วันที่เข้าทำงาน': emp.joinDate ? dayjs(emp.joinDate).format('DD/MM/YYYY') : '-',
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Employees");
+    XLSX.writeFile(wb, `Employees_${dayjs().format('YYYYMMDD')}.xlsx`);
+  };
+
   // Columns ตาราง
   const columns = [
     { title: 'รหัสพนักงาน', dataIndex: 'employeeId', key: 'employeeId' },
@@ -339,6 +368,13 @@ const ManageEmployees = () => {
           </Select>
           <Button type="primary" icon={<UserAddOutlined />} onClick={handleAddClick}>
             เพิ่มพนักงานใหม่
+          </Button>
+          <Button
+            icon={<FileExcelOutlined />}
+            onClick={handleExportExcel}
+            style={{ backgroundColor: '#1D6F42', color: 'white' }}
+          >
+            Export ข้อมูลพนักงาน
           </Button>
         </Space>
       </Card>
