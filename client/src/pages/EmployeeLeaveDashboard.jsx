@@ -309,8 +309,9 @@ export default function EmployeeLeaveDashboard() {
     }
 
     let current = dayjs(selectInfo.startStr);
-    const end = dayjs(selectInfo.endStr); 
+    const end = dayjs(selectInfo.endStr);
     const newEvents = [];
+    let skippedCount = 0;
 
     while (current.isBefore(end)) {
         const dateStr = current.format("YYYY-MM-DD");
@@ -319,16 +320,26 @@ export default function EmployeeLeaveDashboard() {
 
         selectedEmployees.forEach((empId) => {
             const emp = employees.find((e) => e.id === empId);
-            
-            let privilegedDepts = ["01", "02"]; 
+
+            // ✅ กันข้อมูลซ้ำ: ข้ามถ้าพนักงานคนนี้มีรายการลา/หยุดในวันนี้อยู่แล้ว
+            const alreadyExists =
+                events.some(ev => !ev.extendedProps.isHoliday && ev.start === dateStr && ev.extendedProps.employeeId === emp.employeeId) ||
+                newEvents.some(ev => ev.start === dateStr && ev.extendedProps.employeeId === emp.employeeId);
+
+            if (alreadyExists) {
+                skippedCount++;
+                return;
+            }
+
+            let privilegedDepts = ["01", "02"];
             if (isHoliday && holidayEvent?.extendedProps.allowSales) {
                 privilegedDepts.push("03", "04");
             }
 
-            const isPrivileged = privilegedDepts.includes(emp.department); 
-            
+            const isPrivileged = privilegedDepts.includes(emp.department);
+
             // ✅ Default เป็น "หยุด" ก่อน ถ้าเข้าเงื่อนไขถึงเป็น "หยุดนักขัตฤกษ์"
-            let defaultType = "หยุด"; 
+            let defaultType = "หยุด";
             if (isHoliday && isPrivileged) defaultType = "หยุดนักขัตฤกษ์";
 
             const displayName = emp.nickname || emp.name;
@@ -339,9 +350,9 @@ export default function EmployeeLeaveDashboard() {
                 start: dateStr,
                 backgroundColor: getEventColor(defaultType, false),
                 borderColor: "transparent",
-                extendedProps: { 
-                    employeeId: emp.employeeId, 
-                    status: "Approved", 
+                extendedProps: {
+                    employeeId: emp.employeeId,
+                    status: "Approved",
                     type: defaultType,
                     isHoliday: false
                 },
@@ -349,6 +360,10 @@ export default function EmployeeLeaveDashboard() {
         });
 
         current = current.add(1, 'day');
+    }
+
+    if (skippedCount > 0) {
+        message.info(`ข้าม ${skippedCount} รายการที่มีข้อมูลอยู่แล้ว เพื่อป้องกันข้อมูลซ้ำ`);
     }
 
     setEvents([...events, ...newEvents]);
