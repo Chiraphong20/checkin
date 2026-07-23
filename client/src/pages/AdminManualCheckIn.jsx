@@ -44,6 +44,7 @@ const leaveStatusTypeMap = {
   "ลากิจ": "ลากิจ",
   "ลาป่วย": "ลาป่วย",
   "พักร้อน": "พักร้อน",
+  "หยุดซ้ำ": "หยุดซ้ำ",
 };
 
 // Helper แปลงเวลา
@@ -630,6 +631,7 @@ export default function AdminManualCheckIn() {
                         <Option value="ลากิจ">ลากิจ</Option>
                         <Option value="ลาป่วย">ลาป่วย</Option>
                         <Option value="พักร้อน">พักร้อน</Option>
+                        <Option value="หยุดซ้ำ">หยุดซ้ำ</Option>
                     </Select>
                 </Form.Item>
              </Col>

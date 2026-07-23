@@ -87,6 +87,7 @@ const getEventColor = (type, isHoliday) => {
     case "พักร้อน": return "#f59e0b";
     case "หยุด": return "#ef4444";
     case "หยุดชดเชย": return "#8b5cf6";
+    case "หยุดซ้ำ": return "#be123c";
     default: return "#6b7280";
   }
 };
@@ -594,6 +595,7 @@ export default function EmployeeLeaveDashboard() {
                     <Tag color="#f59e0b">พักร้อน</Tag>
                     <Tag color="#8b5cf6">หยุดชดเชย</Tag>
                     <Tag color="#ef4444">หยุด (ปกติ)</Tag>
+                    <Tag color="#be123c">หยุดซ้ำ</Tag>
                 </div>
             </Col>
          </Row>
@@ -653,6 +655,7 @@ export default function EmployeeLeaveDashboard() {
                   <Option value="พักร้อน">พักร้อน</Option>
                   <Option value="หยุดนักขัตฤกษ์">หยุดนักขัตฤกษ์</Option>
                   <Option value="หยุดชดเชย">หยุดชดเชย</Option>
+                  <Option value="หยุดซ้ำ">หยุดซ้ำ</Option>
                </Select>
             </Form.Item>
             <Form.Item label="สถานะการอนุมัติ">
